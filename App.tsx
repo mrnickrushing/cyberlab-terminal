@@ -1,5 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   Linking,
   Pressable,
@@ -12,12 +12,11 @@ import { WebView } from 'react-native-webview';
 
 const TERMINAL_URL = 'https://terminal.vitallity.org';
 
-const keyCaps = ['Esc', 'Tab', 'Ctrl', 'Alt', 'Up', 'Down', 'Left', 'Right'];
-
 export default function App() {
   const [webKey, setWebKey] = useState(0);
   const [statusLabel, setStatusLabel] = useState('Connecting');
   const [statusTone, setStatusTone] = useState<'neutral' | 'good' | 'warn'>('neutral');
+  const webViewRef = useRef<WebView>(null);
 
   function reloadTerminal() {
     setStatusLabel('Reconnecting');
@@ -27,6 +26,17 @@ export default function App() {
 
   async function openInBrowser() {
     await Linking.openURL(TERMINAL_URL);
+  }
+
+  function openCopyMode() {
+    setStatusLabel('Copy Mode');
+    setStatusTone('neutral');
+    webViewRef.current?.injectJavaScript(`
+      if (typeof openSelectionOverlay === 'function') {
+        openSelectionOverlay();
+      }
+      true;
+    `);
   }
 
   return (
@@ -64,12 +74,13 @@ export default function App() {
       </View>
 
       <View style={styles.terminalShell}>
-        <View style={styles.terminalChrome}>
+        <Pressable onLongPress={openCopyMode} delayLongPress={280} style={styles.terminalChrome}>
           <Text style={styles.terminalChromeTitle}>terminal.vitallity.org</Text>
-          <Text style={styles.terminalChromeMeta}>5 min resume window</Text>
-        </View>
+          <Text style={styles.terminalChromeMeta}>Long-press here to copy</Text>
+        </Pressable>
 
         <WebView
+          ref={webViewRef}
           key={webKey}
           source={{ uri: TERMINAL_URL }}
           style={styles.webview}
@@ -94,14 +105,6 @@ export default function App() {
             setStatusTone('warn');
           }}
         />
-      </View>
-
-      <View style={styles.keyRow}>
-        {keyCaps.map((keyCap) => (
-          <View key={keyCap} style={styles.keyChip}>
-            <Text style={styles.keyText}>{keyCap}</Text>
-          </View>
-        ))}
       </View>
     </SafeAreaView>
   );
@@ -239,27 +242,5 @@ const styles = StyleSheet.create({
   webview: {
     flex: 1,
     backgroundColor: '#02060f',
-  },
-  keyRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 12,
-  },
-  keyChip: {
-    minWidth: 56,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    backgroundColor: '#0d1730',
-    borderWidth: 1,
-    borderColor: '#29e9ff22',
-  },
-  keyText: {
-    color: '#e6f4ff',
-    fontSize: 12,
-    fontWeight: '700',
   },
 });
