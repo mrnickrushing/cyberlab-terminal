@@ -1,0 +1,142 @@
+workflows:
+  validate:
+    name: Validate Expo App
+    instance_type: linux_x2
+    max_build_duration: 20
+    environment:
+      node: 20.19.4
+    scripts:
+      - name: Install dependencies
+        script: |
+          npm ci --prefer-offline=false
+      - name: Type check
+        script: |
+          npm run typecheck
+      - name: Validate Expo config
+        script: |
+          npx expo config --type public --json > /tmp/expo-config.json
+          node -e "const app=require('/tmp/expo-config.json'); if (app.ios.bundleIdentifier !== 'com.cyberlabterminal.app') throw new Error('Unexpected iOS bundle identifier: ' + app.ios.bundleIdentifier);"
+
+  ota-update:
+    name: Expo OTA Update
+    instance_type: linux_x2
+    max_build_duration: 20
+    environment:
+      groups:
+        - expo_credentials
+      node: 20.19.4
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
+    scripts:
+      - name: Install dependencies
+        script: |
+          npm ci --prefer-offline=false
+      - name: Decide whether this commit is JS-only
+        script: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD || git ls-files)
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -E '^(package\.json|package-lock\.json|app\.json|app\.config\.[jt]s|eas\.json|codemagic\.yaml|ios/|android/|metro\.config\.js|babel\.config\.js)$|\.(podspec|gradle)$'; then
+            echo "NATIVE_OR_CONFIG_CHANGED=true" >> "$CM_ENV"
+            echo "Native or build-config files changed; skipping OTA."
+          else
+            echo "NATIVE_OR_CONFIG_CHANGED=false" >> "$CM_ENV"
+          fi
+      - name: Publish EAS Update
+        script: |
+          if [ "$NATIVE_OR_CONFIG_CHANGED" = "true" ]; then
+            echo "Skipped because this change needs a native build."
+            exit 0
+          fi
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "EXPO_TOKEN env var is not set. Add it to the expo_credentials group in Codemagic."
+            exit 1
+          fi
+          npx eas-cli update \
+            --branch production \
+            --message "$CM_COMMIT $(git log -1 --pretty=%s | head -c 80)" \
+            --non-interactive
+
+  ios-testflight:
+    name: iOS to TestFlight
+    instance_type: mac_mini_m2
+    max_build_duration: 120
+    environment:
+      node: 20.19.4
+      xcode: latest
+      cocoapods: default
+      vars:
+        BUNDLE_ID: com.cyberlabterminal.app
+        XCODE_SCHEME: CyberLabTerminal
+        APPLE_TEAM_ID: PH4AKDQ4Q7
+      groups:
+        - ios_credentials
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+          source: true
+    scripts:
+      - name: Install dependencies
+        script: |
+          npm ci --prefer-offline=false
+      - name: Validate Expo config
+        script: |
+          npx expo config --type public --json > /tmp/expo-config.json
+          node -e "const app=require('/tmp/expo-config.json'); if (app.ios.bundleIdentifier !== process.env.BUNDLE_ID) throw new Error('Unexpected iOS bundle identifier: ' + app.ios.bundleIdentifier);"
+      - name: Validate App Store Connect credentials
+        script: |
+          if [ -z "$APP_STORE_CONNECT_PRIVATE_KEY" ] || [ -z "$APP_STORE_CONNECT_KEY_IDENTIFIER" ] || [ -z "$APP_STORE_CONNECT_ISSUER_ID" ]; then
+            echo "Missing App Store Connect credentials. Add APP_STORE_CONNECT_PRIVATE_KEY, APP_STORE_CONNECT_KEY_IDENTIFIER, and APP_STORE_CONNECT_ISSUER_ID to the ios_credentials group."
+            exit 1
+          fi
+      - name: Set up keychain
+        script: |
+          keychain initialize
+      - name: Fetch signing files
+        script: |
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+      - name: Add certificates to keychain
+        script: |
+          keychain add-certificates
+      - name: Generate native iOS project
+        script: |
+          CI=1 npx expo prebuild --platform ios --clean
+      - name: Install CocoaPods
+        script: |
+          cd ios
+          pod install
+      - name: Set build number
+        script: |
+          VERSION=$(node -p "require('./package.json').version")
+          cd ios
+          agvtool new-marketing-version "$VERSION"
+          agvtool new-version -all "$BUILD_NUMBER"
+      - name: Set up code signing
+        script: |
+          xcode-project use-profiles \
+            --project "$CM_BUILD_DIR/ios/$XCODE_SCHEME.xcodeproj"
+      - name: Build and sign IPA
+        script: |
+          xcode-project build-ipa \
+            --workspace "$CM_BUILD_DIR/ios/$XCODE_SCHEME.xcworkspace" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
+    publishing:
+      app_store_connect:
+        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
+        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
+        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
+        submit_to_testflight: true
+        submit_to_app_store: false
