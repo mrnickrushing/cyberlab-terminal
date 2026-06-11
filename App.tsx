@@ -1,91 +1,108 @@
 import { StatusBar } from 'expo-status-bar';
+import { useState } from 'react';
 import {
+  Linking,
+  Pressable,
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { WebView } from 'react-native-webview';
 
-const quickActions = [
-  'Reconnect relay',
-  'Paste key',
-  'Open snippets',
-  'Resize font',
-];
+const TERMINAL_URL = 'https://terminal.vitallity.org';
 
-const terminalKeys = ['Esc', 'Tab', 'Ctrl', 'Alt', 'Up', 'Down', 'Left', 'Right'];
-
-const terminalPreview = [
-  'operator@cyberlab:~$ connect terminal.vitallity.org',
-  '[relay] session restored',
-  '[relay] resume window: 05:00',
-  'operator@cyberlab:~$ sudo tmux attach -t main',
-  '[tmux] attached to session main',
-];
+const keyCaps = ['Esc', 'Tab', 'Ctrl', 'Alt', 'Up', 'Down', 'Left', 'Right'];
 
 export default function App() {
+  const [webKey, setWebKey] = useState(0);
+  const [statusLabel, setStatusLabel] = useState('Connecting');
+  const [statusTone, setStatusTone] = useState<'neutral' | 'good' | 'warn'>('neutral');
+
+  function reloadTerminal() {
+    setStatusLabel('Reconnecting');
+    setStatusTone('neutral');
+    setWebKey((current) => current + 1);
+  }
+
+  async function openInBrowser() {
+    await Linking.openURL(TERMINAL_URL);
+  }
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="light" />
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.heroCard}>
+
+      <View style={styles.header}>
+        <View>
           <Text style={styles.eyebrow}>CyberLab Terminal</Text>
-          <Text style={styles.heroTitle}>Pocket access to your relay-backed shell.</Text>
-          <Text style={styles.heroBody}>
-            Built for fast reconnects, command snippets, and a terminal UX that feels
-            intentional instead of bolted on.
-          </Text>
-
-          <View style={styles.statusRow}>
-            <View style={styles.statusPill}>
-              <View style={styles.statusDot} />
-              <Text style={styles.statusText}>Relay Ready</Text>
-            </View>
-            <View style={styles.secondaryPill}>
-              <Text style={styles.secondaryPillText}>Session resume target: 5 min</Text>
-            </View>
-          </View>
+          <Text style={styles.title}>Live Relay Session</Text>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Quick Actions</Text>
-          <View style={styles.grid}>
-            {quickActions.map((action) => (
-              <View key={action} style={styles.actionCard}>
-                <Text style={styles.actionTitle}>{action}</Text>
-                <Text style={styles.actionBody}>Terminal-first workflow with OTA-friendly UI.</Text>
-              </View>
-            ))}
-          </View>
+        <View style={styles.statusPill}>
+          <View
+            style={[
+              styles.statusDot,
+              statusTone === 'good'
+                ? styles.statusDotGood
+                : statusTone === 'warn'
+                  ? styles.statusDotWarn
+                  : styles.statusDotNeutral,
+            ]}
+          />
+          <Text style={styles.statusText}>{statusLabel}</Text>
+        </View>
+      </View>
+
+      <View style={styles.toolbar}>
+        <Pressable onPress={reloadTerminal} style={styles.primaryButton}>
+          <Text style={styles.primaryButtonText}>Reload Terminal</Text>
+        </Pressable>
+        <Pressable onPress={openInBrowser} style={styles.secondaryButton}>
+          <Text style={styles.secondaryButtonText}>Open in Safari</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.terminalShell}>
+        <View style={styles.terminalChrome}>
+          <Text style={styles.terminalChromeTitle}>terminal.vitallity.org</Text>
+          <Text style={styles.terminalChromeMeta}>5 min resume window</Text>
         </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Terminal Preview</Text>
-          <View style={styles.terminalCard}>
-            <View style={styles.terminalHeader}>
-              <Text style={styles.terminalHeaderText}>live relay</Text>
-              <Text style={styles.terminalHeaderMeta}>ws://resume enabled</Text>
-            </View>
-            {terminalPreview.map((line) => (
-              <Text key={line} style={styles.terminalLine}>
-                {line}
-              </Text>
-            ))}
-          </View>
-        </View>
+        <WebView
+          key={webKey}
+          source={{ uri: TERMINAL_URL }}
+          style={styles.webview}
+          containerStyle={styles.webviewContainer}
+          originWhitelist={['*']}
+          javaScriptEnabled
+          domStorageEnabled
+          allowsBackForwardNavigationGestures={false}
+          setSupportMultipleWindows={false}
+          bounces={false}
+          startInLoadingState
+          onLoadStart={() => {
+            setStatusLabel('Connecting');
+            setStatusTone('neutral');
+          }}
+          onLoadEnd={() => {
+            setStatusLabel('Live');
+            setStatusTone('good');
+          }}
+          onError={() => {
+            setStatusLabel('Load Failed');
+            setStatusTone('warn');
+          }}
+        />
+      </View>
 
-        <View style={styles.section}>
-          <Text style={styles.sectionLabel}>Accessory Row</Text>
-          <View style={styles.keyRow}>
-            {terminalKeys.map((key) => (
-              <View key={key} style={styles.keyChip}>
-                <Text style={styles.keyText}>{key}</Text>
-              </View>
-            ))}
+      <View style={styles.keyRow}>
+        {keyCaps.map((keyCap) => (
+          <View key={keyCap} style={styles.keyChip}>
+            <Text style={styles.keyText}>{keyCap}</Text>
           </View>
-        </View>
-      </ScrollView>
+        ))}
+      </View>
     </SafeAreaView>
   );
 }
@@ -93,165 +110,156 @@ export default function App() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#050816',
+    backgroundColor: '#040816',
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 14,
   },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 32,
-    gap: 24,
-  },
-  heroCard: {
-    borderRadius: 28,
-    padding: 24,
-    backgroundColor: '#091222',
-    borderWidth: 1,
-    borderColor: '#1be7ff33',
-    shadowColor: '#1be7ff',
-    shadowOpacity: 0.24,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 12,
+    gap: 12,
   },
   eyebrow: {
-    color: '#1be7ff',
-    fontSize: 12,
+    color: '#29e9ff',
+    fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 2,
+    letterSpacing: 1.8,
     textTransform: 'uppercase',
-    marginBottom: 12,
+    marginBottom: 4,
   },
-  heroTitle: {
-    color: '#f3fbff',
-    fontSize: 30,
-    lineHeight: 36,
+  title: {
+    color: '#f4fbff',
+    fontSize: 26,
     fontWeight: '800',
-    marginBottom: 12,
-  },
-  heroBody: {
-    color: '#9db6c7',
-    fontSize: 15,
-    lineHeight: 23,
-  },
-  statusRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginTop: 18,
   },
   statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    backgroundColor: '#0d1a15',
-    borderWidth: 1,
-    borderColor: '#71ff7a44',
-    borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#0b1325',
+    borderWidth: 1,
+    borderColor: '#1be7ff22',
   },
   statusDot: {
     width: 8,
     height: 8,
     borderRadius: 999,
-    backgroundColor: '#6eff7d',
+  },
+  statusDotNeutral: {
+    backgroundColor: '#29e9ff',
+  },
+  statusDotGood: {
+    backgroundColor: '#75ff8f',
+  },
+  statusDotWarn: {
+    backgroundColor: '#ff8b7c',
   },
   statusText: {
-    color: '#d6ffe0',
-    fontSize: 13,
+    color: '#d7e8f7',
+    fontSize: 12,
     fontWeight: '700',
   },
-  secondaryPill: {
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: '#101d35',
+  toolbar: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 12,
   },
-  secondaryPillText: {
-    color: '#b7cbff',
-    fontSize: 13,
-    fontWeight: '600',
+  primaryButton: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    backgroundColor: '#10284f',
+    borderWidth: 1,
+    borderColor: '#29e9ff33',
   },
-  section: {
-    gap: 12,
+  primaryButtonText: {
+    color: '#f3fbff',
+    fontSize: 14,
+    fontWeight: '700',
   },
-  sectionLabel: {
-    color: '#c8d7e6',
-    fontSize: 13,
+  secondaryButton: {
+    flex: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: 'center',
+    backgroundColor: '#0a111f',
+    borderWidth: 1,
+    borderColor: '#75ff8f33',
+  },
+  secondaryButtonText: {
+    color: '#d9ffe1',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  terminalShell: {
+    flex: 1,
+    overflow: 'hidden',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: '#29e9ff33',
+    backgroundColor: '#02060f',
+    shadowColor: '#29e9ff',
+    shadowOpacity: 0.18,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  terminalChrome: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: '#09111f',
+    borderBottomWidth: 1,
+    borderBottomColor: '#29e9ff22',
+  },
+  terminalChromeTitle: {
+    color: '#6ffff0',
+    fontSize: 12,
     fontWeight: '700',
     letterSpacing: 1.2,
     textTransform: 'uppercase',
   },
-  grid: {
-    gap: 12,
-  },
-  actionCard: {
-    borderRadius: 20,
-    padding: 18,
-    backgroundColor: '#0a1020',
-    borderWidth: 1,
-    borderColor: '#2affd522',
-  },
-  actionTitle: {
-    color: '#f0fbff',
-    fontSize: 17,
-    fontWeight: '700',
-    marginBottom: 6,
-  },
-  actionBody: {
-    color: '#8ea3b8',
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  terminalCard: {
-    borderRadius: 22,
-    padding: 18,
-    backgroundColor: '#02060f',
-    borderWidth: 1,
-    borderColor: '#6eff7d33',
-  },
-  terminalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  terminalHeaderText: {
-    color: '#6eff7d',
-    fontSize: 13,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 1.4,
-  },
-  terminalHeaderMeta: {
-    color: '#4bf4ff',
+  terminalChromeMeta: {
+    color: '#8ca7bc',
     fontSize: 12,
     fontWeight: '600',
   },
-  terminalLine: {
-    color: '#d6ffe0',
-    fontSize: 14,
-    lineHeight: 22,
-    fontFamily: 'monospace',
+  webviewContainer: {
+    flex: 1,
+    backgroundColor: '#02060f',
+  },
+  webview: {
+    flex: 1,
+    backgroundColor: '#02060f',
   },
   keyRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 8,
+    marginTop: 12,
   },
   keyChip: {
-    minWidth: 58,
+    minWidth: 56,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 14,
-    backgroundColor: '#0e1730',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    backgroundColor: '#0d1730',
     borderWidth: 1,
-    borderColor: '#1be7ff33',
+    borderColor: '#29e9ff22',
   },
   keyText: {
-    color: '#e7f7ff',
-    fontSize: 13,
+    color: '#e6f4ff',
+    fontSize: 12,
     fontWeight: '700',
   },
 });
