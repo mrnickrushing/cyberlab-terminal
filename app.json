@@ -17,9 +17,18 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.cyberlabterminal.app",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "Allow CyberLab Terminal to select screenshots from your photo library."
       }
     },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow CyberLab Terminal to select screenshots from your photo library."
+        }
+      ]
+    ],
     "android": {
       "package": "com.cyberlabterminal.app",
       "adaptiveIcon": {
