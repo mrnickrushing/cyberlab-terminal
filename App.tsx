@@ -16,6 +16,8 @@ import {
 import { WebView } from 'react-native-webview';
 
 const TERMINAL_URL = 'https://terminal.vitallity.org';
+const RELAY_UPLOAD_URL = 'https://terminal-connection-production.up.railway.app/upload-screenshot';
+const RELAY_TOKEN = 'kali-remote-secret-token-123';
 
 export default function App() {
   const [webKey, setWebKey] = useState(0);
@@ -111,13 +113,38 @@ export default function App() {
     setStatusLabel('Screenshot ready');
     setStatusTone('good');
 
-    await Clipboard.setStringAsync(uploadScript);
-    webViewRef.current?.injectJavaScript(`
-      if (typeof pasteClipboard === 'function') {
-        pasteClipboard();
+    try {
+      const response = await fetch(RELAY_UPLOAD_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Terminal-Token': RELAY_TOKEN,
+        },
+        body: JSON.stringify({
+          filename: name,
+          mimeType,
+          base64,
+        }),
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (response.ok && payload?.ok && payload.commandSent) {
+        setStatusLabel('Uploaded to relay');
+        setStatusTone('good');
+        return;
       }
-      true;
-    `);
+      throw new Error(payload?.error ?? (payload?.commandSent ? 'relay upload failed' : 'relay offline'));
+    } catch (error) {
+      await Clipboard.setStringAsync(uploadScript);
+      webViewRef.current?.injectJavaScript(`
+        if (typeof pasteClipboard === 'function') {
+          pasteClipboard();
+        }
+        true;
+      `);
+      setStatusLabel('Relay unavailable');
+      setStatusTone('warn');
+    }
   }
 
   return (
@@ -169,7 +196,7 @@ export default function App() {
               {pickedScreenshot.name}
             </Text>
             <Text style={styles.previewNote}>
-              Pasted into the shell as a base64 decode command.
+              Relay upload first, shell paste fallback if needed.
             </Text>
           </View>
         </View>
