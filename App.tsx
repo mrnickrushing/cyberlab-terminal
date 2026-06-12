@@ -1,6 +1,11 @@
 import { StatusBar } from 'expo-status-bar';
+import * as Clipboard from 'expo-clipboard';
+import * as FileSystem from 'expo-file-system';
+import * as ImagePicker from 'expo-image-picker';
 import { useRef, useState } from 'react';
 import {
+  Alert,
+  Image,
   Linking,
   Pressable,
   SafeAreaView,
@@ -16,6 +21,12 @@ export default function App() {
   const [webKey, setWebKey] = useState(0);
   const [statusLabel, setStatusLabel] = useState('Connecting');
   const [statusTone, setStatusTone] = useState<'neutral' | 'good' | 'warn'>('neutral');
+  const [pickedScreenshot, setPickedScreenshot] = useState<{
+    uri: string;
+    name: string;
+    width?: number;
+    height?: number;
+  } | null>(null);
   const webViewRef = useRef<WebView>(null);
 
   function reloadTerminal() {
@@ -34,6 +45,76 @@ export default function App() {
     webViewRef.current?.injectJavaScript(`
       if (typeof openSelectionOverlay === 'function') {
         openSelectionOverlay();
+      }
+      true;
+    `);
+  }
+
+  async function pickScreenshot() {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      setStatusLabel('Photos blocked');
+      setStatusTone('warn');
+      Alert.alert(
+        'Photos access needed',
+        'Allow photo library access so you can pick a screenshot from your phone.',
+      );
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 1,
+      allowsEditing: false,
+    });
+
+    if (result.canceled || !result.assets.length) {
+      setStatusLabel('Picker canceled');
+      setStatusTone('neutral');
+      return;
+    }
+
+    const asset = result.assets[0];
+    const name = asset.fileName ?? `screenshot-${Date.now()}.jpg`;
+    const mimeType = asset.mimeType ?? 'image/jpeg';
+    const ext =
+      mimeType === 'image/png'
+        ? 'png'
+        : mimeType === 'image/webp'
+          ? 'webp'
+          : 'jpg';
+    const safeBaseName = name
+      .replace(/\.[^.]+$/, '')
+      .replace(/[^a-zA-Z0-9-_]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 48) || 'screenshot';
+    const remotePath = `/tmp/${safeBaseName}-${Date.now()}.${ext}`;
+    const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    const uploadScript = [
+      `cat > "${remotePath}.b64" <<'EOF'`,
+      base64,
+      'EOF',
+      `base64 -d "${remotePath}.b64" > "${remotePath}"`,
+      `rm -f "${remotePath}.b64"`,
+      `printf '\\n[Saved screenshot to %s]\\n' "${remotePath}"`,
+      '',
+    ].join('\n');
+
+    setPickedScreenshot({
+      uri: asset.uri,
+      name,
+      width: asset.width,
+      height: asset.height,
+    });
+    setStatusLabel('Screenshot ready');
+    setStatusTone('good');
+
+    await Clipboard.setStringAsync(uploadScript);
+    webViewRef.current?.injectJavaScript(`
+      if (typeof pasteClipboard === 'function') {
+        pasteClipboard();
       }
       true;
     `);
@@ -68,10 +149,31 @@ export default function App() {
         <Pressable onPress={reloadTerminal} style={styles.primaryButton}>
           <Text style={styles.primaryButtonText}>Reload Terminal</Text>
         </Pressable>
-        <Pressable onPress={openInBrowser} style={styles.secondaryButton}>
-          <Text style={styles.secondaryButtonText}>Open in Safari</Text>
+        <Pressable onPress={pickScreenshot} style={styles.secondaryButton}>
+          <Text style={styles.secondaryButtonText}>Upload Screenshot</Text>
         </Pressable>
       </View>
+
+      <View style={styles.toolbarSecondary}>
+        <Pressable onPress={openInBrowser} style={styles.tertiaryButton}>
+          <Text style={styles.tertiaryButtonText}>Open in Safari</Text>
+        </Pressable>
+      </View>
+
+      {pickedScreenshot ? (
+        <View style={styles.previewCard}>
+          <Image source={{ uri: pickedScreenshot.uri }} style={styles.previewImage} />
+          <View style={styles.previewMeta}>
+            <Text style={styles.previewLabel}>Selected screenshot</Text>
+            <Text style={styles.previewName} numberOfLines={1}>
+              {pickedScreenshot.name}
+            </Text>
+            <Text style={styles.previewNote}>
+              Pasted into the shell as a base64 decode command.
+            </Text>
+          </View>
+        </View>
+      ) : null}
 
       <View style={styles.terminalShell}>
         <Pressable onLongPress={openCopyMode} delayLongPress={280} style={styles.terminalChrome}>
@@ -173,6 +275,9 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 12,
   },
+  toolbarSecondary: {
+    marginBottom: 12,
+  },
   primaryButton: {
     flex: 1,
     borderRadius: 14,
@@ -200,6 +305,57 @@ const styles = StyleSheet.create({
     color: '#d9ffe1',
     fontSize: 14,
     fontWeight: '700',
+  },
+  tertiaryButton: {
+    alignItems: 'center',
+    borderRadius: 14,
+    paddingVertical: 12,
+    backgroundColor: '#0a111f',
+    borderWidth: 1,
+    borderColor: '#ffffff14',
+  },
+  tertiaryButtonText: {
+    color: '#d7e8f7',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  previewCard: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+    padding: 12,
+    marginBottom: 12,
+    borderRadius: 18,
+    backgroundColor: '#08111f',
+    borderWidth: 1,
+    borderColor: '#29e9ff22',
+  },
+  previewImage: {
+    width: 64,
+    height: 64,
+    borderRadius: 14,
+    backgroundColor: '#07101c',
+  },
+  previewMeta: {
+    flex: 1,
+    gap: 4,
+  },
+  previewLabel: {
+    color: '#29e9ff',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
+  previewName: {
+    color: '#f4fbff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  previewNote: {
+    color: '#8ca7bc',
+    fontSize: 12,
+    lineHeight: 16,
   },
   terminalShell: {
     flex: 1,
