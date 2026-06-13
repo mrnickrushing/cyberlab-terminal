@@ -1,20 +1,20 @@
 # CyberLab Terminal
 
-CyberLab Terminal is a focused Expo app for connecting to the CyberLab terminal relay from iPhone with a terminal-first interface and OTA-friendly UI updates.
+CyberLab Terminal is a focused Expo app for connecting to the live terminal relay from iPhone with a terminal-first interface and OTA-friendly UI updates.
 
 ## Current direction
 
 - Expo / React Native app for personal use
 - Shares CyberLab branding and iconography
 - Intended to connect to the existing Railway-hosted terminal relay
-- Designed around reconnect behavior, command snippets, and better mobile terminal controls
+- Designed around reconnect behavior, command snippets, relay settings, and better mobile terminal controls
 
 ## Planned features
 
-- WebView-backed terminal client
+- Relay-backed terminal client using a WebView shell
 - Resume-aware relay reconnect flow
 - Accessory key row for `Esc`, `Tab`, `Ctrl`, arrows, and paste
-- Screenshot picker that prepares an upload shell command for the active terminal session
+- Screenshot picker that sends a shell upload command into the active terminal session
 - Saved command snippets
 - Theme, font size, and layout settings
 - OTA updates for UI and terminal client logic through EAS Update
@@ -28,6 +28,13 @@ npm start
 ## iOS
 
 Bundle identifier is currently set to `com.cyberlabterminal.app`. Adjust if needed before first App Store Connect registration.
+
+Default relay settings:
+
+- URL: `wss://terminal-connection-production.up.railway.app`
+- Token: `kali-remote-secret-token-123`
+
+If your active Railway relay uses a different URL or token, change them in the in-app settings panel after launch.
 
 ## Codemagic
 
