@@ -200,23 +200,25 @@ export default function App() {
       <StatusBar style="light" />
 
       <View style={styles.header}>
-        <View style={styles.headerCopy}>
-          <Text style={styles.eyebrow}>CyberLab Terminal</Text>
-          <Text style={styles.title}>Live terminal shell</Text>
-        </View>
+        <View style={styles.headerTopRow}>
+          <View style={styles.headerCopy}>
+            <Text style={styles.eyebrow}>CyberLab Terminal</Text>
+            <Text style={styles.title}>Live Terminal Shell</Text>
+          </View>
 
-        <View style={styles.statusPill}>
-          <View
-            style={[
-              styles.statusDot,
-              statusTone === 'good'
-                ? styles.statusDotGood
-                : statusTone === 'warn'
-                  ? styles.statusDotWarn
-                  : styles.statusDotNeutral,
-            ]}
-          />
-          <Text style={styles.statusText}>{statusLabel}</Text>
+          <View style={styles.statusPill}>
+            <View
+              style={[
+                styles.statusDot,
+                statusTone === 'good'
+                  ? styles.statusDotGood
+                  : statusTone === 'warn'
+                    ? styles.statusDotWarn
+                    : styles.statusDotNeutral,
+              ]}
+            />
+            <Text style={styles.statusText}>{statusLabel}</Text>
+          </View>
         </View>
       </View>
 
@@ -298,10 +300,14 @@ const styles = StyleSheet.create({
     paddingBottom: 14,
   },
   header: {
+    flexDirection: 'column',
+    marginBottom: 12,
+    gap: 10,
+  },
+  headerTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 12,
     gap: 12,
   },
   headerCopy: {
@@ -309,21 +315,22 @@ const styles = StyleSheet.create({
   },
   eyebrow: {
     color: '#29e9ff',
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '800',
-    letterSpacing: 1.8,
-    textTransform: 'uppercase',
+    letterSpacing: 0.8,
     marginBottom: 4,
   },
   title: {
     color: '#f4fbff',
-    fontSize: 26,
+    fontSize: 22,
     fontWeight: '800',
+    lineHeight: 26,
   },
   statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    alignSelf: 'flex-start',
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
@@ -465,10 +472,9 @@ const styles = StyleSheet.create({
   },
   terminalChromeTitle: {
     color: '#6ffff0',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
   terminalChromeMeta: {
     color: '#8ca7bc',
