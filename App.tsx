@@ -1,5 +1,4 @@
 import { StatusBar } from 'expo-status-bar';
-import * as Clipboard from 'expo-clipboard';
 import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { useRef, useState } from 'react';
@@ -47,11 +46,17 @@ export default function App() {
     `);
   }
 
-  function pasteClipboardIntoTerminal() {
+  function typeCommandIntoTerminal(command: string) {
     webViewRef.current?.injectJavaScript(`
-      if (typeof pasteClipboard === 'function') {
-        pasteClipboard();
-      }
+      (function() {
+        const command = ${JSON.stringify(command)};
+        if (typeof sendKey === 'function') {
+          for (const ch of command) {
+            sendKey(ch);
+          }
+          sendKey('\\r');
+        }
+      })();
       true;
     `);
   }
@@ -115,8 +120,7 @@ export default function App() {
     setStatusLabel('Upload command ready');
     setStatusTone('good');
 
-    await Clipboard.setStringAsync(uploadScript);
-    pasteClipboardIntoTerminal();
+    typeCommandIntoTerminal(uploadScript);
   }
 
   return (
@@ -170,7 +174,7 @@ export default function App() {
               {pickedScreenshot.name}
             </Text>
             <Text style={styles.previewNote}>
-              Copied shell upload command into the live terminal clipboard.
+              Typed the upload command into the live terminal session.
             </Text>
           </View>
         </View>
