@@ -14,6 +14,7 @@ CyberLab Terminal is a focused Expo app for connecting to the CyberLab terminal 
 - WebView-backed terminal client
 - Resume-aware relay reconnect flow
 - Accessory key row for `Esc`, `Tab`, `Ctrl`, arrows, and paste
+- Screenshot picker that prepares an upload shell command for the active terminal session
 - Saved command snippets
 - Theme, font size, and layout settings
 - OTA updates for UI and terminal client logic through EAS Update
