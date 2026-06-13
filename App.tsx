@@ -183,6 +183,7 @@ export default function App() {
       setStatusLabel('Sending command');
       setStatusTone('good');
       typeCommandIntoTerminal(downloadCommand);
+      setPickedScreenshot(null);
       return;
     } catch (error) {
       failUpload('Send to temporary host', error);
