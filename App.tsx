@@ -14,7 +14,7 @@ import {
 import { WebView } from 'react-native-webview';
 
 const TERMINAL_URL = 'https://terminal.vitallity.org';
-const TEMP_FILE_HOST = 'https://tmpfiles.org/api/v1/upload';
+const TEMP_FILE_HOST = 'https://catbox.moe/user/api.php';
 
 export default function App() {
   const [webKey, setWebKey] = useState(0);
@@ -145,6 +145,7 @@ export default function App() {
           name: `${safeBaseName}.${ext}`,
           type: mimeType,
         } as never);
+        formData.append('reqtype', 'fileupload');
 
         const uploadResponse = await fetch(TEMP_FILE_HOST, {
           method: 'POST',
@@ -166,8 +167,11 @@ export default function App() {
         const uploadResult = await FileSystem.uploadAsync(TEMP_FILE_HOST, tempFileUri, {
           httpMethod: 'POST',
           uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-          fieldName: 'file',
+          fieldName: 'fileToUpload',
           mimeType,
+          parameters: {
+            reqtype: 'fileupload',
+          },
         });
         uploadUrl = uploadResult.body.trim();
       }
@@ -175,8 +179,7 @@ export default function App() {
         throw new Error('upload host returned no URL');
       }
 
-      const downloadUrl = uploadUrl.replace('https://tmpfiles.org/', 'https://tmpfiles.org/dl/');
-      const downloadCommand = `curl -fsSL ${JSON.stringify(downloadUrl)} -o /tmp/${safeBaseName}-${Date.now()}.${ext}`;
+      const downloadCommand = `curl -fsSL ${JSON.stringify(uploadUrl)} -o /tmp/${safeBaseName}-${Date.now()}.${ext}`;
       setStatusLabel('Sending command');
       setStatusTone('good');
       typeCommandIntoTerminal(downloadCommand);
