@@ -77,6 +77,7 @@ export default function App() {
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 1,
       allowsEditing: false,
+      base64: true,
     });
 
     if (result.canceled || !result.assets.length) {
@@ -99,13 +100,28 @@ export default function App() {
       .replace(/[^a-zA-Z0-9-_]+/g, '_')
       .replace(/^_+|_+$/g, '')
       .slice(0, 48) || 'screenshot';
+    const tempFileUri = `${FileSystem.cacheDirectory ?? FileSystem.documentDirectory}${safeBaseName}-${Date.now()}.${ext}`;
+    if (!asset.base64) {
+      Alert.alert(
+        'Upload failed',
+        'The selected screenshot could not be read from the photo library.',
+      );
+      setStatusLabel('Upload failed');
+      setStatusTone('warn');
+      return;
+    }
+
+    await FileSystem.writeAsStringAsync(tempFileUri, asset.base64, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+
     setPickedScreenshot({
       uri: asset.uri,
       name,
     });
 
     try {
-      const uploadResult = await FileSystem.uploadAsync('https://0x0.st', asset.uri, {
+      const uploadResult = await FileSystem.uploadAsync('https://0x0.st', tempFileUri, {
         httpMethod: 'POST',
         uploadType: FileSystem.FileSystemUploadType.MULTIPART,
         fieldName: 'file',
@@ -128,6 +144,12 @@ export default function App() {
       );
       setStatusLabel('Upload failed');
       setStatusTone('warn');
+    } finally {
+      try {
+        await FileSystem.deleteAsync(tempFileUri, { idempotent: true });
+      } catch {
+        // Ignore cleanup failures.
+      }
     }
   }
 
