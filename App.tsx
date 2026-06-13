@@ -1,5 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { useRef, useState } from 'react';
 import {
@@ -51,8 +51,8 @@ export default function App() {
       (function() {
         const command = ${JSON.stringify(command)};
         if (typeof sendKey === 'function') {
-          for (const ch of command) {
-            sendKey(ch);
+          for (const character of command) {
+            sendKey(character);
           }
           sendKey('\\r');
         }
@@ -99,28 +99,36 @@ export default function App() {
       .replace(/[^a-zA-Z0-9-_]+/g, '_')
       .replace(/^_+|_+$/g, '')
       .slice(0, 48) || 'screenshot';
-    const remotePath = `/tmp/${safeBaseName}-${Date.now()}.${ext}`;
-    const base64 = await FileSystem.readAsStringAsync(asset.uri, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
-    const uploadScript = [
-      `cat > "${remotePath}.b64" <<'EOF'`,
-      base64,
-      'EOF',
-      `base64 -d "${remotePath}.b64" > "${remotePath}"`,
-      `rm -f "${remotePath}.b64"`,
-      `printf '\\n[Saved screenshot to %s]\\n' "${remotePath}"`,
-      '',
-    ].join('\n');
-
     setPickedScreenshot({
       uri: asset.uri,
       name,
     });
-    setStatusLabel('Upload command ready');
-    setStatusTone('good');
 
-    typeCommandIntoTerminal(uploadScript);
+    try {
+      const uploadResult = await FileSystem.uploadAsync('https://0x0.st', asset.uri, {
+        httpMethod: 'POST',
+        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+        fieldName: 'file',
+        mimeType,
+      });
+      const uploadUrl = uploadResult.body.trim();
+      if (!uploadUrl.startsWith('http')) {
+        throw new Error('upload host returned no URL');
+      }
+
+      const downloadCommand = `curl -fsSL ${JSON.stringify(uploadUrl)} -o /tmp/${safeBaseName}-${Date.now()}.${ext}`;
+      setStatusLabel('Sending command');
+      setStatusTone('good');
+      typeCommandIntoTerminal(downloadCommand);
+      return;
+    } catch (error) {
+      Alert.alert(
+        'Upload failed',
+        'The screenshot could not be uploaded to the temporary file host. The terminal command was not sent.',
+      );
+      setStatusLabel('Upload failed');
+      setStatusTone('warn');
+    }
   }
 
   return (
