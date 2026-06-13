@@ -122,13 +122,29 @@ export default function App() {
     });
 
     try {
-      const uploadResult = await FileSystem.uploadAsync(TEMP_FILE_HOST, tempFileUri, {
-        httpMethod: 'POST',
-        uploadType: FileSystem.FileSystemUploadType.MULTIPART,
-        fieldName: 'file',
-        mimeType,
+      const formData = new FormData();
+      formData.append('file', {
+        uri: tempFileUri,
+        name: `${safeBaseName}.${ext}`,
+        type: mimeType,
+      } as never);
+
+      const uploadResponse = await fetch(TEMP_FILE_HOST, {
+        method: 'POST',
+        body: formData,
       });
-      const uploadUrl = uploadResult.body.trim();
+      const uploadBody = await uploadResponse.text();
+      if (!uploadResponse.ok) {
+        throw new Error(`upload host returned ${uploadResponse.status}: ${uploadBody}`);
+      }
+
+      let uploadUrl = uploadBody.trim();
+      try {
+        const parsed = JSON.parse(uploadUrl);
+        uploadUrl = parsed?.data?.url ?? parsed?.url ?? uploadUrl;
+      } catch {
+        // Body is already a plain URL.
+      }
       if (!uploadUrl.startsWith('http')) {
         throw new Error('upload host returned no URL');
       }
