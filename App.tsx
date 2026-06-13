@@ -62,6 +62,18 @@ export default function App() {
     `);
   }
 
+  function failUpload(stage: string, error?: unknown) {
+    const detail =
+      error instanceof Error
+        ? error.message
+        : typeof error === 'string'
+          ? error
+          : 'unknown error';
+    setStatusLabel(`${stage} failed`);
+    setStatusTone('warn');
+    Alert.alert('Upload failed', `${stage} failed: ${detail}`);
+  }
+
   async function pickScreenshot() {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
@@ -102,19 +114,21 @@ export default function App() {
       .replace(/^_+|_+$/g, '')
       .slice(0, 48) || 'screenshot';
     const tempFileUri = `${FileSystem.cacheDirectory ?? FileSystem.documentDirectory}${safeBaseName}-${Date.now()}.${ext}`;
+    setStatusLabel('Preparing screenshot');
+    setStatusTone('neutral');
     if (!asset.base64) {
-      Alert.alert(
-        'Upload failed',
-        'The selected screenshot could not be read from the photo library.',
-      );
-      setStatusLabel('Upload failed');
-      setStatusTone('warn');
+      failUpload('Read photo library', 'no base64 payload from picker');
       return;
     }
 
-    await FileSystem.writeAsStringAsync(tempFileUri, asset.base64, {
-      encoding: FileSystem.EncodingType.Base64,
-    });
+    try {
+      await FileSystem.writeAsStringAsync(tempFileUri, asset.base64, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+    } catch (error) {
+      failUpload('Stage local file', error);
+      return;
+    }
 
     setPickedScreenshot({
       uri: asset.uri,
@@ -122,28 +136,40 @@ export default function App() {
     });
 
     try {
-      const formData = new FormData();
-      formData.append('file', {
-        uri: tempFileUri,
-        name: `${safeBaseName}.${ext}`,
-        type: mimeType,
-      } as never);
+      let uploadUrl = '';
 
-      const uploadResponse = await fetch(TEMP_FILE_HOST, {
-        method: 'POST',
-        body: formData,
-      });
-      const uploadBody = await uploadResponse.text();
-      if (!uploadResponse.ok) {
-        throw new Error(`upload host returned ${uploadResponse.status}: ${uploadBody}`);
-      }
-
-      let uploadUrl = uploadBody.trim();
       try {
-        const parsed = JSON.parse(uploadUrl);
-        uploadUrl = parsed?.data?.url ?? parsed?.url ?? uploadUrl;
-      } catch {
-        // Body is already a plain URL.
+        const formData = new FormData();
+        formData.append('file', {
+          uri: tempFileUri,
+          name: `${safeBaseName}.${ext}`,
+          type: mimeType,
+        } as never);
+
+        const uploadResponse = await fetch(TEMP_FILE_HOST, {
+          method: 'POST',
+          body: formData,
+        });
+        const uploadBody = await uploadResponse.text();
+        if (!uploadResponse.ok) {
+          throw new Error(`upload host returned ${uploadResponse.status}: ${uploadBody}`);
+        }
+
+        uploadUrl = uploadBody.trim();
+        try {
+          const parsed = JSON.parse(uploadUrl);
+          uploadUrl = parsed?.data?.url ?? parsed?.url ?? uploadUrl;
+        } catch {
+          // Body is already a plain URL.
+        }
+      } catch (primaryError) {
+        const uploadResult = await FileSystem.uploadAsync(TEMP_FILE_HOST, tempFileUri, {
+          httpMethod: 'POST',
+          uploadType: FileSystem.FileSystemUploadType.MULTIPART,
+          fieldName: 'file',
+          mimeType,
+        });
+        uploadUrl = uploadResult.body.trim();
       }
       if (!uploadUrl.startsWith('http')) {
         throw new Error('upload host returned no URL');
@@ -156,12 +182,7 @@ export default function App() {
       typeCommandIntoTerminal(downloadCommand);
       return;
     } catch (error) {
-      Alert.alert(
-        'Upload failed',
-        'The screenshot could not be uploaded to the temporary file host. The terminal command was not sent.',
-      );
-      setStatusLabel('Upload failed');
-      setStatusTone('warn');
+      failUpload('Send to temporary host', error);
     } finally {
       try {
         await FileSystem.deleteAsync(tempFileUri, { idempotent: true });
