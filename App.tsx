@@ -1,4 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
+import * as Clipboard from 'expo-clipboard';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import { useRef, useState } from 'react';
@@ -11,7 +12,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { WebView } from 'react-native-webview';
+import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 
 const TERMINAL_URL = 'https://terminal.vitallity.org';
 const TEMP_FILE_HOST = 'https://catbox.moe/user/api.php';
@@ -60,6 +61,33 @@ export default function App() {
       })();
       true;
     `);
+  }
+
+  async function handleWebViewMessage(event: WebViewMessageEvent) {
+    let payload: unknown;
+    try {
+      payload = JSON.parse(event.nativeEvent.data);
+    } catch {
+      return;
+    }
+    if (
+      typeof payload !== 'object' ||
+      payload === null ||
+      (payload as { type?: unknown }).type !== 'copy'
+    ) {
+      return;
+    }
+    const text = (payload as { text?: unknown }).text;
+    if (typeof text !== 'string' || !text) return;
+
+    try {
+      await Clipboard.setStringAsync(text);
+      setStatusLabel('Copied to clipboard');
+      setStatusTone('good');
+    } catch (error) {
+      setStatusLabel('Copy failed');
+      setStatusTone('warn');
+    }
   }
 
   function failUpload(stage: string, error?: unknown) {
@@ -286,6 +314,7 @@ export default function App() {
             setStatusLabel('Load failed');
             setStatusTone('warn');
           }}
+          onMessage={handleWebViewMessage}
         />
       </View>
     </SafeAreaView>
