@@ -24,6 +24,29 @@ CyberLab Terminal is a focused Expo app for connecting to the live terminal at `
 npm start
 ```
 
+## Terminal relay server (Railway)
+
+The app's WebView points at `https://terminal.vitallity.org`, which is the relay
+server in [server/terminal-relay-server.ts](server/terminal-relay-server.ts)
+running on Railway (project `Terminal-Relay`, service `terminal-relay`).
+
+That service uses Railway's serverless `function-bun` image, so there is no git
+build step. The server code is shipped to the container as a single base64
+environment variable (`SERVER_B64`) and decoded + executed at boot by the service
+start command.
+
+To change the relay, edit `server/terminal-relay-server.ts` and redeploy with:
+
+```bash
+RAILWAY_TOKEN=<railway-token> ./server/deploy-relay.sh
+```
+
+Do **not** hand-edit `SERVER_B64` in the Railway dashboard, and never split it
+into `PART1`/`PART2`/... chunks — that is what previously corrupted the deploy and
+took the site down. Always change the source file and re-run the script, which
+re-encodes from source and verifies a byte-for-byte base64 round-trip before
+shipping.
+
 ## iOS
 
 Bundle identifier is currently set to `com.cyberlabterminal.app`. Adjust if needed before first App Store Connect registration.
