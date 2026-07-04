@@ -84,9 +84,15 @@ export default function App() {
       await Clipboard.setStringAsync(text);
       setStatusLabel('Copied to clipboard');
       setStatusTone('good');
+      webViewRef.current?.injectJavaScript(
+        'if (window.__onCopyAck) { window.__onCopyAck(true); } true;'
+      );
     } catch (error) {
       setStatusLabel('Copy failed');
       setStatusTone('warn');
+      webViewRef.current?.injectJavaScript(
+        'if (window.__onCopyAck) { window.__onCopyAck(false); } true;'
+      );
     }
   }
 

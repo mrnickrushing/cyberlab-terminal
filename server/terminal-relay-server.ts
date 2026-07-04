@@ -573,8 +573,20 @@ function getWebUI() {
       }
 
       if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+        let settled = false;
+        window.__onCopyAck = function (success) {
+          if (settled) return;
+          settled = true;
+          window.__onCopyAck = null;
+          flash(success ? '✓ Copied!' : 'Copy failed', success ? 'success' : 'warn');
+        };
+        setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          window.__onCopyAck = null;
+          flash('No response', 'warn');
+        }, 2000);
         window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'copy', text }));
-        flash('✓ Copied!', 'success');
         return;
       }
 
