@@ -239,7 +239,7 @@ function getWebUI() {
 <body>
   <div id="status">✗ Disconnected</div>
   <div id="terminal-container">
-    <div id="tap-hint">Tap to type · long-press text to select</div>
+    <div id="tap-hint">Tap to type · use Select button to copy text</div>
     <div id="sel-handle-start" class="sel-handle"></div>
     <div id="sel-handle-end" class="sel-handle"></div>
     <div id="sel-toolbar">
@@ -252,6 +252,7 @@ function getWebUI() {
     <button class="key-btn" onclick="sendKey('\\x1b[B')">▼</button>
     <button class="key-btn" onclick="sendKey('\\x1b[D')">◀</button>
     <button class="key-btn" onclick="sendKey('\\x1b[C')">▶</button>
+    <button class="key-btn" onclick="sendKey('\\x1b')">Esc</button>
     <button class="key-btn" onclick="sendKey('\\t')">Tab</button>
     <button class="key-btn" onclick="sendKey('\\x03')">Ctrl+C</button>
     <button class="key-btn" onclick="pasteClipboard()">Paste</button>
@@ -286,13 +287,11 @@ function getWebUI() {
     fitAddon.fit();
 
     // --- Touch-based text selection -------------------------------------
-    // xterm's DOM renderer produces real, natively-selectable <span> text.
-    // Without disabling that (see CSS above) a long-press on mobile is
-    // captured by the WebView's own text-selection/context-menu instead of
-    // reaching this code, which is why selection previously did nothing.
-    // Selection here is driven entirely through term.select() + two
-    // draggable handles + a floating copy toolbar, mirroring native
-    // long-press-to-select-word, drag-to-extend mobile text selection.
+    // Selection is triggered only via the Select button (toggleSelectMode).
+    // Once in select mode any drag on the terminal extends the selection via
+    // two draggable handles + a floating copy toolbar. Normal taps are
+    // always forwarded to the terminal for typing/focus, and never
+    // accidentally open the selection UI.
     (function setupSelection() {
       const container = document.getElementById('terminal-container');
       const handleA = document.getElementById('sel-handle-start');
@@ -301,13 +300,11 @@ function getWebUI() {
       const copyBtn = document.getElementById('sel-copy-btn');
       const cancelBtn = document.getElementById('sel-cancel-btn');
 
-      const LONG_PRESS_MS = 380;
-      const MOVE_THRESHOLD = 10;
+      const MOVE_THRESHOLD = 10; // px; tracks finger jitter so taps don't count as moves
 
       let anchorA = null; // raw cell tied to handleA / the selection's lower bound
       let anchorB = null; // raw cell tied to handleB / the selection's upper bound
-      let mode = 'idle'; // idle | maybeClear | dragLegacy | extending
-      let longPressTimer = null;
+      let mode = 'idle'; // idle | maybeClear | dragLegacy
       let touchStartPos = null;
       let touchMoved = false;
 
@@ -459,14 +456,6 @@ function getWebUI() {
         }
 
         mode = isSelecting ? 'maybeClear' : 'idle';
-
-        clearTimeout(longPressTimer);
-        longPressTimer = setTimeout(() => {
-          if (touchMoved) return;
-          if (isSelecting) endSelectionSession();
-          beginWordSelection(cell);
-          mode = 'extending';
-        }, LONG_PRESS_MS);
       }, { passive: false });
 
       container.addEventListener('touchmove', (e) => {
@@ -475,10 +464,9 @@ function getWebUI() {
           const dist = Math.hypot(touch.clientX - touchStartPos.x, touch.clientY - touchStartPos.y);
           if (dist > MOVE_THRESHOLD) {
             touchMoved = true;
-            clearTimeout(longPressTimer);
           }
         }
-        if (mode === 'dragLegacy' || mode === 'extending') {
+        if (mode === 'dragLegacy') {
           e.preventDefault();
           anchorB = getCell(touch);
           setSelection(anchorA, anchorB);
@@ -486,8 +474,7 @@ function getWebUI() {
       }, { passive: false });
 
       container.addEventListener('touchend', (e) => {
-        clearTimeout(longPressTimer);
-        if (mode === 'dragLegacy' || mode === 'extending') {
+        if (mode === 'dragLegacy') {
           mode = 'idle';
           return;
         }
