@@ -427,6 +427,10 @@ function getWebUI() {
       bindHandle(handleB, 'B');
 
       function bindToolbarButton(el, action) {
+        el.addEventListener('touchstart', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+        }, { passive: false });
         el.addEventListener('touchend', (e) => {
           e.preventDefault();
           e.stopPropagation();
