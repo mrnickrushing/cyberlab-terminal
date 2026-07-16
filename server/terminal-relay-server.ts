@@ -321,6 +321,28 @@ function getWebUI() {
       box-shadow: 0 0 12px rgba(0,255,156,.45), inset 0 0 10px rgba(0,255,156,.18);
       transform: translateY(1px);
     }
+    /* --- collapse handle for the Fn (nano) key row --- */
+    #keys-toggle {
+      flex-shrink: 0;
+      align-self: center;
+      margin: 8px auto 0;
+      padding: 4px 20px;
+      border-radius: 999px;
+      border: 1px solid rgba(41,233,255,.28);
+      background: rgba(10,15,30,.9);
+      color: var(--cyan);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      font-family: 'Monaco', 'Courier New', monospace;
+      cursor: pointer;
+      box-shadow: inset 0 0 10px rgba(41,233,255,.06);
+    }
+    #keys-toggle:active {
+      background: rgba(41,233,255,.18);
+      box-shadow: 0 0 12px rgba(41,233,255,.4);
+    }
   </style>
 </head>
 <body>
@@ -344,6 +366,7 @@ function getWebUI() {
     <button class="key-btn" onclick="sendKey('\\x03')">^C</button>
     <button class="key-btn" onclick="pasteClipboard()">Paste</button>
   </div>
+  <button id="keys-toggle" onclick="toggleKeysRow()" aria-label="Toggle Fn keys">▾ Fn keys</button>
   <div id="keys-row2">
     <button class="key-btn2" onclick="sendKey('\\x18')">^X Exit</button>
     <button class="key-btn2" onclick="sendKey('\\x0f')">^O Save</button>
@@ -595,6 +618,30 @@ function getWebUI() {
     }
 
     window.addEventListener('resize', sendResize);
+
+    // --- collapsible Fn (nano) key row ---------------------------------
+    // The second key row eats vertical space; collapsing it hands that
+    // height back to the terminal. Preference is remembered per device.
+    function applyKeysRow(show) {
+      const row2 = document.getElementById('keys-row2');
+      const btn = document.getElementById('keys-toggle');
+      if (!row2 || !btn) return;
+      row2.style.display = show ? 'flex' : 'none';
+      btn.textContent = (show ? '\u25be' : '\u25b4') + ' Fn keys';
+      try { localStorage.setItem('cyberlab_fnrow', show ? '1' : '0'); } catch (e) {}
+    }
+    function toggleKeysRow() {
+      const row2 = document.getElementById('keys-row2');
+      const show = row2.style.display === 'none';
+      applyKeysRow(show);
+      // let layout settle, then refit the terminal into the reclaimed space
+      setTimeout(sendResize, 60);
+    }
+    (function initKeysRow() {
+      let show = true;
+      try { if (localStorage.getItem('cyberlab_fnrow') === '0') show = false; } catch (e) {}
+      applyKeysRow(show);
+    })();
 
     let ws = null;
     let selectMode = false;
