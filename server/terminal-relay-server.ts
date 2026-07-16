@@ -261,16 +261,22 @@ function getWebUI() {
       box-shadow: 0 0 10px rgba(255,46,154,.25);
     }
     /* --- neon key rows --- */
-    #keys-row {
+    #keys-row, #keys-row2 {
       display: flex;
       gap: 7px;
-      padding: 7px 8px 0;
       flex-shrink: 0;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
     }
+    #keys-row::-webkit-scrollbar, #keys-row2::-webkit-scrollbar { display: none; }
+    #keys-row { padding: 7px 8px 0; }
     .key-btn {
-      flex: 1;
-      min-width: 40px;
+      flex: 1 0 auto;
+      min-width: 38px;
       min-height: 46px;
+      padding: 0 6px;
+      white-space: nowrap;
       color: var(--cyan);
       border: 1px solid rgba(41,233,255,.32);
       background: linear-gradient(180deg, rgba(41,233,255,.10), rgba(41,233,255,.02));
@@ -290,16 +296,13 @@ function getWebUI() {
       transform: translateY(1px);
     }
     .key-btn.select-active { color: var(--amber); border-color: rgba(255,176,32,.5); background: linear-gradient(180deg, rgba(255,176,32,.2), rgba(255,176,32,.05)); box-shadow: 0 0 14px rgba(255,176,32,.4); }
-    #keys-row2 {
-      display: flex;
-      gap: 7px;
-      padding: 7px 8px 8px;
-      flex-shrink: 0;
-    }
+    #keys-row2 { padding: 7px 8px 8px; }
     .key-btn2 {
-      flex: 1;
+      flex: 1 0 auto;
       min-width: 40px;
       min-height: 40px;
+      padding: 0 6px;
+      white-space: nowrap;
       color: var(--lime);
       border: 1px solid rgba(0,255,156,.3);
       background: linear-gradient(180deg, rgba(0,255,156,.10), rgba(0,255,156,.02));
@@ -338,7 +341,7 @@ function getWebUI() {
     <button class="key-btn" onclick="sendKey('\\x1b[C')">▶</button>
     <button class="key-btn" onclick="sendKey('\\x1b')">Esc</button>
     <button class="key-btn" onclick="sendKey('\\t')">Tab</button>
-    <button class="key-btn" onclick="sendKey('\\x03')">Ctrl+C</button>
+    <button class="key-btn" onclick="sendKey('\\x03')">^C</button>
     <button class="key-btn" onclick="pasteClipboard()">Paste</button>
   </div>
   <div id="keys-row2">
