@@ -86,39 +86,93 @@ function getWebUI() {
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>Terminal Remote</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css">
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --cyan: #29e9ff; --magenta: #ff2e9a; --lime: #00ff9c; --amber: #ffb020;
+      --bg: #05070f; --panel: #0a0f1e; --line: #1b2b45;
+      --safe-top: env(safe-area-inset-top, 0px);
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    * {
+      margin: 0; padding: 0; box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
     body {
-      background: #0d0d0d;
-      color: #00ff00;
+      background: var(--bg);
+      color: var(--lime);
       display: flex;
       flex-direction: column;
       height: 100dvh;
       font-family: 'Monaco', 'Courier New', monospace;
+      padding-top: var(--safe-top);
+      padding-bottom: var(--safe-bottom);
+      background-image:
+        linear-gradient(rgba(41,233,255,.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(41,233,255,.035) 1px, transparent 1px);
+      background-size: 24px 24px;
     }
+    /* --- slim neon status strip --- */
     #status {
-      padding: 6px 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 14px;
       font-size: 12px;
-      background: #3a1a1a;
-      color: #ff6b6b;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--amber);
       flex-shrink: 0;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(90deg, rgba(255,176,32,.08), rgba(255,46,154,.04));
     }
-    #status.connected { background: #1a3a1a; color: #00ff00; }
+    #status::before {
+      content: '';
+      width: 9px; height: 9px; border-radius: 50%;
+      background: var(--amber);
+      box-shadow: 0 0 8px var(--amber), 0 0 16px var(--amber);
+    }
+    #status.connected {
+      color: var(--cyan);
+      background: linear-gradient(90deg, rgba(41,233,255,.10), rgba(255,46,154,.05));
+    }
+    #status.connected::before {
+      background: var(--lime);
+      box-shadow: 0 0 8px var(--lime), 0 0 16px var(--lime);
+      animation: pulse 1.6s infinite;
+    }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+    /* --- terminal fills nearly all vertical space --- */
     #terminal-container {
       position: relative;
       flex: 1;
       overflow: hidden;
-      padding: 4px;
+      margin: 8px;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
       cursor: text;
       -webkit-user-select: none;
       user-select: none;
       -webkit-touch-callout: none;
+      background:
+        radial-gradient(120% 80% at 50% 0%, rgba(41,233,255,.05), transparent 60%),
+        var(--bg);
+    }
+    #terminal-container::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: repeating-linear-gradient(0deg, rgba(0,0,0,0) 0 2px, rgba(0,0,0,.10) 2px 3px);
     }
     #terminal-container .xterm {
       height: 100%;
+      position: relative;
+      z-index: 1;
     }
     #terminal-container .xterm * {
       -webkit-user-select: none;
@@ -127,14 +181,17 @@ function getWebUI() {
     }
     #tap-hint {
       position: absolute;
-      bottom: 60px;
+      bottom: 16px;
       left: 50%;
       transform: translateX(-50%);
-      background: rgba(0,0,0,0.7);
-      color: #666;
+      z-index: 2;
+      background: rgba(5,7,15,0.85);
+      border: 1px solid var(--line);
+      color: #5f7597;
       font-size: 11px;
-      padding: 4px 10px;
-      border-radius: 10px;
+      letter-spacing: .5px;
+      padding: 5px 12px;
+      border-radius: 999px;
       pointer-events: none;
       transition: opacity 0.5s;
     }
@@ -154,8 +211,9 @@ function getWebUI() {
       left: 9px;
       width: 4px;
       height: 14px;
-      background: #29e9ff;
+      background: var(--cyan);
       border-radius: 2px;
+      box-shadow: 0 0 6px var(--cyan);
     }
     .sel-handle::after {
       content: '';
@@ -165,75 +223,101 @@ function getWebUI() {
       width: 12px;
       height: 12px;
       border-radius: 50%;
-      background: #29e9ff;
+      background: var(--cyan);
+      box-shadow: 0 0 8px var(--cyan);
     }
+    /* --- floating selection toolbar --- */
     #sel-toolbar {
       display: none;
       position: absolute;
       z-index: 21;
-      gap: 4px;
-      padding: 4px;
-      border-radius: 8px;
-      background: #14202c;
-      border: 1px solid #29e9ff55;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+      gap: 6px;
+      padding: 5px;
+      border-radius: 10px;
+      background: rgba(10,15,30,0.95);
+      border: 1px solid rgba(41,233,255,.4);
+      box-shadow: 0 4px 18px rgba(0,0,0,0.6), 0 0 14px rgba(41,233,255,.25);
       touch-action: none;
     }
     .sel-toolbar-btn {
-      background: #1a2a3a;
-      color: #6ee9ff;
-      border: 1px solid #29e9ff33;
-      padding: 7px 12px;
-      border-radius: 6px;
+      min-height: 36px;
+      background: linear-gradient(180deg, rgba(0,255,156,.18), rgba(0,255,156,.04));
+      color: var(--lime);
+      border: 1px solid rgba(0,255,156,.5);
+      padding: 8px 14px;
+      border-radius: 7px;
       font-size: 12px;
+      font-weight: 700;
       font-family: 'Monaco', 'Courier New', monospace;
       white-space: nowrap;
+      box-shadow: 0 0 10px rgba(0,255,156,.25);
     }
-    .sel-toolbar-btn.success { color: #00ff00; border-color: #00aa00; background: #0a2a0a; }
-    .sel-toolbar-btn.warn { color: #ffaa00; border-color: #aa6600; }
-    #sel-cancel-btn { color: #ff8b7c; border-color: #ff8b7c33; }
+    .sel-toolbar-btn.success { color: var(--lime); border-color: var(--lime); background: rgba(0,255,156,.22); }
+    .sel-toolbar-btn.warn { color: var(--amber); border-color: rgba(255,176,32,.6); background: rgba(255,176,32,.12); }
+    #sel-cancel-btn {
+      color: var(--magenta);
+      border-color: rgba(255,46,154,.5);
+      background: linear-gradient(180deg, rgba(255,46,154,.16), rgba(255,46,154,.03));
+      box-shadow: 0 0 10px rgba(255,46,154,.25);
+    }
+    /* --- neon key rows --- */
     #keys-row {
       display: flex;
-      gap: 5px;
-      padding: 6px 8px;
-      background: #1a1a1a;
-      border-top: 1px solid #333;
+      gap: 7px;
+      padding: 7px 8px 0;
       flex-shrink: 0;
     }
     .key-btn {
       flex: 1;
-      background: #2a2a2a;
-      color: #00ff00;
-      border: 1px solid #444;
-      padding: 10px 4px;
-      border-radius: 4px;
+      min-width: 40px;
+      min-height: 46px;
+      color: var(--cyan);
+      border: 1px solid rgba(41,233,255,.32);
+      background: linear-gradient(180deg, rgba(41,233,255,.10), rgba(41,233,255,.02));
+      border-radius: 8px;
       cursor: pointer;
-      font-size: 13px;
+      font-size: 14px;
+      font-weight: 700;
       font-family: 'Monaco', 'Courier New', monospace;
       user-select: none;
+      box-shadow: inset 0 0 12px rgba(41,233,255,.06);
+      clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+      transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
     }
-    .key-btn:active { background: #3a3a3a; }
-    .key-btn.select-active { background: #2a1a4a; color: #aa66ff; border-color: #664499; }
+    .key-btn:active {
+      background: linear-gradient(180deg, rgba(41,233,255,.35), rgba(41,233,255,.12));
+      box-shadow: 0 0 14px rgba(41,233,255,.55), inset 0 0 12px rgba(41,233,255,.2);
+      transform: translateY(1px);
+    }
+    .key-btn.select-active { color: var(--amber); border-color: rgba(255,176,32,.5); background: linear-gradient(180deg, rgba(255,176,32,.2), rgba(255,176,32,.05)); box-shadow: 0 0 14px rgba(255,176,32,.4); }
     #keys-row2 {
       display: flex;
-      gap: 5px;
-      padding: 0 8px 6px;
-      background: #1a1a1a;
+      gap: 7px;
+      padding: 7px 8px 8px;
       flex-shrink: 0;
     }
     .key-btn2 {
       flex: 1;
-      background: #1a2a1a;
-      color: #00cc00;
-      border: 1px solid #2a4a2a;
-      padding: 7px 2px;
-      border-radius: 4px;
+      min-width: 40px;
+      min-height: 40px;
+      color: var(--lime);
+      border: 1px solid rgba(0,255,156,.3);
+      background: linear-gradient(180deg, rgba(0,255,156,.10), rgba(0,255,156,.02));
+      border-radius: 8px;
       cursor: pointer;
       font-size: 11px;
+      font-weight: 700;
       font-family: 'Monaco', 'Courier New', monospace;
       user-select: none;
+      box-shadow: inset 0 0 10px rgba(0,255,156,.05);
+      clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
+      transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
     }
-    .key-btn2:active { background: #2a3a2a; }
+    .key-btn2:active {
+      background: linear-gradient(180deg, rgba(0,255,156,.3), rgba(0,255,156,.1));
+      box-shadow: 0 0 12px rgba(0,255,156,.45), inset 0 0 10px rgba(0,255,156,.18);
+      transform: translateY(1px);
+    }
   </style>
 </head>
 <body>
@@ -271,11 +355,13 @@ function getWebUI() {
   <script>
     const term = new Terminal({
       theme: {
-        background: '#0d0d0d',
-        foreground: '#00ff00',
-        cursor: '#00ff00',
+        background: '#05070f',
+        foreground: '#00ff9c',
+        cursor: '#29e9ff',
+        cursorAccent: '#05070f',
+        selectionBackground: 'rgba(41,233,255,0.35)',
       },
-      fontSize: 13,
+      fontSize: 14,
       fontFamily: 'Monaco, Courier New, monospace',
       convertEol: true,
       scrollback: 2000,

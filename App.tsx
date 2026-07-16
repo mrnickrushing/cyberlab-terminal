@@ -234,41 +234,39 @@ export default function App() {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="light" />
 
-      <View style={styles.header}>
-        <View style={styles.headerTopRow}>
-          <View style={styles.headerCopy}>
-            <Text style={styles.eyebrow}>CyberLab Terminal</Text>
-            <Text style={styles.title}>Live Terminal Shell</Text>
-          </View>
+      <View style={styles.topBar}>
+        <View style={styles.headerCopy}>
+          <Text style={styles.eyebrow}>CYBERLAB</Text>
+          <Text style={styles.title}>Terminal Shell</Text>
+        </View>
 
-          <View style={styles.statusPill}>
-            <View
-              style={[
-                styles.statusDot,
-                statusTone === 'good'
-                  ? styles.statusDotGood
-                  : statusTone === 'warn'
-                    ? styles.statusDotWarn
-                    : styles.statusDotNeutral,
-              ]}
-            />
-            <Text style={styles.statusText}>{statusLabel}</Text>
-          </View>
+        <View style={styles.statusPill}>
+          <View
+            style={[
+              styles.statusDot,
+              statusTone === 'good'
+                ? styles.statusDotGood
+                : statusTone === 'warn'
+                  ? styles.statusDotWarn
+                  : styles.statusDotNeutral,
+            ]}
+          />
+          <Text style={styles.statusText}>{statusLabel}</Text>
         </View>
       </View>
 
-      <View style={styles.toolbar}>
-        <Pressable onPress={reloadTerminal} style={styles.primaryButton}>
-          <Text style={styles.primaryButtonText}>Reload Terminal</Text>
+      <View style={styles.actionRow}>
+        <Pressable onPress={reloadTerminal} style={[styles.actionButton, styles.actionPrimary]}>
+          <Text style={[styles.actionText, styles.actionTextPrimary]}>⟳  Reload</Text>
         </Pressable>
-        <Pressable onPress={pickScreenshot} style={styles.secondaryButton}>
-          <Text style={styles.secondaryButtonText}>Upload Screenshot</Text>
+        <Pressable onPress={pickScreenshot} style={styles.actionButton}>
+          <Text style={styles.actionText}>⇪  Upload</Text>
         </Pressable>
-      </View>
-
-      <View style={styles.toolbarSecondary}>
-        <Pressable onPress={openInBrowser} style={styles.tertiaryButton}>
-          <Text style={styles.tertiaryButtonText}>Open in Safari</Text>
+        <Pressable onPress={openCopyMode} style={[styles.actionButton, styles.actionAccent]}>
+          <Text style={[styles.actionText, styles.actionTextAccent]}>✂  Copy</Text>
+        </Pressable>
+        <Pressable onPress={openInBrowser} style={styles.actionButton}>
+          <Text style={styles.actionText}>⇱  Safari</Text>
         </Pressable>
       </View>
 
@@ -291,8 +289,8 @@ export default function App() {
 
       <View style={styles.terminalShell}>
         <Pressable onLongPress={openCopyMode} delayLongPress={280} style={styles.terminalChrome}>
-          <Text style={styles.terminalChromeTitle}>terminal.vitallity.org</Text>
-          <Text style={styles.terminalChromeMeta}>Long-press here to select text</Text>
+          <Text style={styles.terminalChromeTitle}>● ● ●   terminal.vitallity.org</Text>
+          <Text style={styles.terminalChromeMeta}>long-press to select</Text>
         </Pressable>
 
         <WebView
@@ -330,20 +328,16 @@ export default function App() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#040816',
-    paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 14,
+    backgroundColor: '#05070f',
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 10,
   },
-  header: {
-    flexDirection: 'column',
-    marginBottom: 12,
-    gap: 10,
-  },
-  headerTopRow: {
+  topBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    marginBottom: 10,
     gap: 12,
   },
   headerCopy: {
@@ -351,16 +345,16 @@ const styles = StyleSheet.create({
   },
   eyebrow: {
     color: '#29e9ff',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '800',
-    letterSpacing: 0.8,
-    marginBottom: 4,
+    letterSpacing: 3,
+    marginBottom: 2,
   },
   title: {
     color: '#f4fbff',
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '800',
-    lineHeight: 26,
+    lineHeight: 24,
   },
   statusPill: {
     flexDirection: 'row',
@@ -370,96 +364,100 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
-    backgroundColor: '#0b1325',
+    backgroundColor: '#0a0f1e',
     borderWidth: 1,
-    borderColor: '#1be7ff22',
+    borderColor: '#1b2b45',
   },
   statusDot: {
-    width: 8,
-    height: 8,
+    width: 9,
+    height: 9,
     borderRadius: 999,
   },
   statusDotNeutral: {
-    backgroundColor: '#29e9ff',
+    backgroundColor: '#ffb020',
+    shadowColor: '#ffb020',
+    shadowOpacity: 0.9,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 0 },
   },
   statusDotGood: {
-    backgroundColor: '#75ff8f',
+    backgroundColor: '#00ff9c',
+    shadowColor: '#00ff9c',
+    shadowOpacity: 0.9,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 0 },
   },
   statusDotWarn: {
-    backgroundColor: '#ff8b7c',
+    backgroundColor: '#ff2e9a',
+    shadowColor: '#ff2e9a',
+    shadowOpacity: 0.9,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 0 },
   },
   statusText: {
     color: '#d7e8f7',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
-  toolbar: {
+  actionRow: {
     flexDirection: 'row',
-    gap: 10,
-    marginBottom: 12,
+    gap: 7,
+    marginBottom: 10,
   },
-  primaryButton: {
+  actionButton: {
     flex: 1,
-    borderRadius: 14,
-    paddingVertical: 12,
+    minHeight: 44,
+    borderRadius: 10,
     alignItems: 'center',
-    backgroundColor: '#10284f',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    backgroundColor: '#0a0f1e',
     borderWidth: 1,
-    borderColor: '#29e9ff33',
+    borderColor: '#1b2b45',
   },
-  primaryButtonText: {
-    color: '#f3fbff',
-    fontSize: 14,
-    fontWeight: '700',
+  actionPrimary: {
+    borderColor: '#00ff9c66',
+    backgroundColor: '#07160f',
   },
-  secondaryButton: {
-    flex: 1.2,
-    borderRadius: 14,
-    paddingVertical: 12,
-    alignItems: 'center',
-    backgroundColor: '#0a111f',
-    borderWidth: 1,
-    borderColor: '#75ff8f33',
+  actionAccent: {
+    borderColor: '#ff2e9a66',
+    backgroundColor: '#170611',
   },
-  secondaryButtonText: {
-    color: '#d9ffe1',
-    fontSize: 14,
-    fontWeight: '700',
+  actionText: {
+    color: '#29e9ff',
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
-  toolbarSecondary: {
-    marginBottom: 12,
+  actionTextPrimary: {
+    color: '#00ff9c',
   },
-  tertiaryButton: {
-    alignItems: 'center',
-    borderRadius: 14,
-    paddingVertical: 12,
-    backgroundColor: '#09111f',
-    borderWidth: 1,
-    borderColor: '#ffffff14',
-  },
-  tertiaryButtonText: {
-    color: '#d7e8f7',
-    fontSize: 14,
-    fontWeight: '700',
+  actionTextAccent: {
+    color: '#ff2e9a',
   },
   previewCard: {
     flexDirection: 'row',
     gap: 12,
     alignItems: 'center',
     padding: 12,
-    marginBottom: 12,
-    borderRadius: 18,
-    backgroundColor: '#08111f',
+    marginBottom: 10,
+    borderRadius: 14,
+    backgroundColor: '#0a0f1e',
     borderWidth: 1,
-    borderColor: '#29e9ff22',
+    borderColor: '#29e9ff33',
   },
   previewThumb: {
-    width: 56,
-    height: 56,
-    borderRadius: 14,
+    width: 52,
+    height: 52,
+    borderRadius: 12,
     backgroundColor: '#10284f',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#29e9ff55',
   },
   previewThumbText: {
     color: '#effcff',
@@ -484,25 +482,25 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   previewNote: {
-    color: '#8ca7bc',
+    color: '#5f7597',
     fontSize: 12,
     lineHeight: 16,
   },
   terminalShell: {
     flex: 1,
-    borderRadius: 22,
+    borderRadius: 14,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#29e9ff33',
-    backgroundColor: '#050816',
+    borderColor: '#29e9ff44',
+    backgroundColor: '#05070f',
   },
   terminalChrome: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: '#09111f',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    backgroundColor: '#0a0f1e',
     borderBottomWidth: 1,
     borderBottomColor: '#29e9ff22',
   },
@@ -513,16 +511,16 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   terminalChromeMeta: {
-    color: '#8ca7bc',
-    fontSize: 12,
+    color: '#5f7597',
+    fontSize: 11,
     fontWeight: '600',
   },
   webviewContainer: {
     flex: 1,
-    backgroundColor: '#050816',
+    backgroundColor: '#05070f',
   },
   webview: {
     flex: 1,
-    backgroundColor: '#050816',
+    backgroundColor: '#05070f',
   },
 });
