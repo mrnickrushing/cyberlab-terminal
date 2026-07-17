@@ -8,6 +8,7 @@ import {
   Linking,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -16,20 +17,49 @@ import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 
 const TERMINAL_URL = 'https://terminal.vitallity.org';
 const TEMP_FILE_HOST = 'https://catbox.moe/user/api.php';
+const MAX_TERMINAL_TABS = 6;
+
+type StatusTone = 'neutral' | 'good' | 'warn';
+
+type TerminalTab = {
+  id: string;
+  index: number;
+  title: string;
+  command: string;
+  active: boolean;
+  running: boolean;
+};
+
+const INITIAL_TERMINAL_TAB: TerminalTab = {
+  id: 'loading',
+  index: 1,
+  title: 'Terminal 1',
+  command: 'Connecting',
+  active: true,
+  running: false,
+};
 
 export default function App() {
   const [webKey, setWebKey] = useState(0);
   const [statusLabel, setStatusLabel] = useState('Connecting');
-  const [statusTone, setStatusTone] = useState<'neutral' | 'good' | 'warn'>('neutral');
+  const [statusTone, setStatusTone] = useState<StatusTone>('neutral');
+  const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>([
+    INITIAL_TERMINAL_TAB,
+  ]);
+  const [tabsReady, setTabsReady] = useState(false);
   const [pickedScreenshot, setPickedScreenshot] = useState<{
     uri: string;
     name: string;
+    terminalTitle: string;
   } | null>(null);
   const webViewRef = useRef<WebView>(null);
+  const activeTerminal =
+    terminalTabs.find((terminal) => terminal.active) ?? terminalTabs[0];
 
   function reloadTerminal() {
     setStatusLabel('Reconnecting');
     setStatusTone('neutral');
+    setTabsReady(false);
     setWebKey((current) => current + 1);
   }
 
@@ -48,11 +78,87 @@ export default function App() {
     `);
   }
 
-  function typeCommandIntoTerminal(command: string) {
+  function sendTerminalTabAction(
+    action: 'list' | 'create' | 'select' | 'close',
+    terminalId?: string,
+  ) {
+    if (!webViewRef.current) {
+      setStatusLabel('Terminal unavailable');
+      setStatusTone('warn');
+      return;
+    }
+
+    webViewRef.current.injectJavaScript(`
+      (function() {
+        if (typeof window.terminalTabAction === 'function') {
+          window.terminalTabAction(${JSON.stringify(action)}, ${JSON.stringify(terminalId ?? null)});
+        } else if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'terminalTabError',
+            message: 'Terminal tabs are still connecting.'
+          }));
+        }
+      })();
+      true;
+    `);
+  }
+
+  function createTerminalTab() {
+    if (!tabsReady) {
+      setStatusLabel('Tabs still connecting');
+      setStatusTone('neutral');
+      return;
+    }
+    if (terminalTabs.length >= MAX_TERMINAL_TABS) {
+      Alert.alert(
+        'Tab limit reached',
+        `CyberLab keeps up to ${MAX_TERMINAL_TABS} live terminals open to protect device and laptop memory.`,
+      );
+      return;
+    }
+    setStatusLabel('Opening terminal');
+    setStatusTone('neutral');
+    sendTerminalTabAction('create');
+  }
+
+  function selectTerminalTab(terminal: TerminalTab) {
+    if (!tabsReady || terminal.active) return;
+    setTerminalTabs((current) =>
+      current.map((item) => ({ ...item, active: item.id === terminal.id })),
+    );
+    setStatusLabel(`Switching to ${terminal.title}`);
+    setStatusTone('neutral');
+    sendTerminalTabAction('select', terminal.id);
+  }
+
+  function closeTerminalTab(terminal: TerminalTab) {
+    if (!tabsReady || terminalTabs.length <= 1) return;
+    Alert.alert(
+      `Close ${terminal.title}?`,
+      'Any command running in this terminal will stop. Other terminal tabs will keep running.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Close Terminal',
+          style: 'destructive',
+          onPress: () => {
+            setStatusLabel(`Closing ${terminal.title}`);
+            setStatusTone('neutral');
+            sendTerminalTabAction('close', terminal.id);
+          },
+        },
+      ],
+    );
+  }
+
+  function typeCommandIntoTerminal(command: string, terminalId?: string) {
     webViewRef.current?.injectJavaScript(`
       (function() {
         const command = ${JSON.stringify(command)};
-        if (typeof sendKey === 'function') {
+        const terminalId = ${JSON.stringify(terminalId ?? activeTerminal?.id ?? null)};
+        if (terminalId && typeof window.terminalTabCommand === 'function') {
+          window.terminalTabCommand(terminalId, command);
+        } else if (typeof sendKey === 'function') {
           for (const character of command) {
             sendKey(character);
           }
@@ -70,13 +176,51 @@ export default function App() {
     } catch {
       return;
     }
-    if (
-      typeof payload !== 'object' ||
-      payload === null ||
-      (payload as { type?: unknown }).type !== 'copy'
-    ) {
+    if (typeof payload !== 'object' || payload === null) return;
+    const type = (payload as { type?: unknown }).type;
+
+    if (type === 'terminalConnection') {
+      const connected = (payload as { connected?: unknown }).connected === true;
+      setStatusLabel(connected ? 'Live' : 'Reconnecting');
+      setStatusTone(connected ? 'good' : 'warn');
+      if (!connected) setTabsReady(false);
       return;
     }
+
+    if (type === 'terminalTabs') {
+      const rawTabs = (payload as { tabs?: unknown }).tabs;
+      if (!Array.isArray(rawTabs)) return;
+      const nextTabs = rawTabs
+        .filter((tab): tab is Record<string, unknown> => typeof tab === 'object' && tab !== null)
+        .map((tab) => ({
+          id: typeof tab.id === 'string' ? tab.id : '',
+          index: typeof tab.index === 'number' ? tab.index : 0,
+          title: typeof tab.title === 'string' ? tab.title : 'Terminal',
+          command: typeof tab.command === 'string' ? tab.command : 'shell',
+          active: tab.active === true,
+          running: tab.running !== false,
+        }))
+        .filter((tab) => tab.id && tab.index > 0)
+        .slice(0, MAX_TERMINAL_TABS);
+      if (!nextTabs.length) return;
+      setTerminalTabs(nextTabs);
+      setTabsReady(true);
+      const active = nextTabs.find((tab) => tab.active) ?? nextTabs[0];
+      setStatusLabel(`${active.title} live`);
+      setStatusTone(active.running ? 'good' : 'warn');
+      return;
+    }
+
+    if (type === 'terminalTabError') {
+      const message = (payload as { message?: unknown }).message;
+      const detail = typeof message === 'string' ? message : 'Terminal tab action failed.';
+      setStatusLabel('Tab action failed');
+      setStatusTone('warn');
+      Alert.alert('Terminal tabs', detail);
+      return;
+    }
+
+    if (type !== 'copy') return;
     const text = (payload as { text?: unknown }).text;
     if (typeof text !== 'string' || !text) return;
 
@@ -109,6 +253,10 @@ export default function App() {
   }
 
   async function pickScreenshot() {
+    const targetTerminalId = tabsReady ? activeTerminal?.id : undefined;
+    const targetTerminalTitle = targetTerminalId
+      ? activeTerminal?.title ?? 'active terminal'
+      : 'the active terminal';
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       setStatusLabel('Photos blocked');
@@ -167,6 +315,7 @@ export default function App() {
     setPickedScreenshot({
       uri: asset.uri,
       name,
+      terminalTitle: targetTerminalTitle,
     });
 
     try {
@@ -216,7 +365,7 @@ export default function App() {
       const downloadCommand = `curl -fsSL ${JSON.stringify(uploadUrl)} -o /tmp/${safeBaseName}-${Date.now()}.${ext}`;
       setStatusLabel('Sending command');
       setStatusTone('good');
-      typeCommandIntoTerminal(downloadCommand);
+      typeCommandIntoTerminal(downloadCommand, targetTerminalId);
       setPickedScreenshot(null);
       return;
     } catch (error) {
@@ -281,15 +430,92 @@ export default function App() {
               {pickedScreenshot.name}
             </Text>
             <Text style={styles.previewNote}>
-              Typed the upload command into the live terminal session.
+              Sent the upload command to {pickedScreenshot.terminalTitle}.
             </Text>
           </View>
         </View>
       ) : null}
 
       <View style={styles.terminalShell}>
+        <View style={styles.tabBar}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.tabScrollContent}
+            style={styles.tabScroll}
+          >
+            {terminalTabs.map((terminal) => (
+              <View
+                key={terminal.id}
+                style={[
+                  styles.terminalTab,
+                  terminal.active ? styles.terminalTabActive : null,
+                ]}
+              >
+                <Pressable
+                  onPress={() => selectTerminalTab(terminal)}
+                  accessibilityRole="tab"
+                  accessibilityLabel={`${terminal.title}, ${terminal.command}`}
+                  accessibilityState={{ selected: terminal.active }}
+                  style={styles.terminalTabMain}
+                >
+                  <View
+                    style={[
+                      styles.terminalTabDot,
+                      terminal.running
+                        ? styles.terminalTabDotRunning
+                        : styles.terminalTabDotStopped,
+                    ]}
+                  />
+                  <View style={styles.terminalTabCopy}>
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        styles.terminalTabTitle,
+                        terminal.active ? styles.terminalTabTitleActive : null,
+                      ]}
+                    >
+                      {terminal.title}
+                    </Text>
+                    <Text numberOfLines={1} style={styles.terminalTabCommand}>
+                      {terminal.command}
+                    </Text>
+                  </View>
+                </Pressable>
+                {tabsReady && terminalTabs.length > 1 ? (
+                  <Pressable
+                    onPress={() => closeTerminalTab(terminal)}
+                    hitSlop={6}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Close ${terminal.title}`}
+                    style={styles.terminalTabClose}
+                  >
+                    <Text style={styles.terminalTabCloseText}>×</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ))}
+          </ScrollView>
+          <Pressable
+            onPress={createTerminalTab}
+            disabled={!tabsReady || terminalTabs.length >= MAX_TERMINAL_TABS}
+            accessibilityRole="button"
+            accessibilityLabel="Open a new terminal tab"
+            style={[
+              styles.addTerminalButton,
+              !tabsReady || terminalTabs.length >= MAX_TERMINAL_TABS
+                ? styles.addTerminalButtonDisabled
+                : null,
+            ]}
+          >
+            <Text style={styles.addTerminalButtonText}>+</Text>
+          </Pressable>
+        </View>
+
         <Pressable onLongPress={openCopyMode} delayLongPress={280} style={styles.terminalChrome}>
-          <Text style={styles.terminalChromeTitle}>● ● ●   terminal.vitallity.org</Text>
+          <Text style={styles.terminalChromeTitle} numberOfLines={1}>
+            ● ● ●   {activeTerminal?.title ?? 'Terminal'} · terminal.vitallity.org
+          </Text>
           <Text style={styles.terminalChromeMeta}>long-press to select</Text>
         </Pressable>
 
@@ -309,14 +535,12 @@ export default function App() {
           onLoadStart={() => {
             setStatusLabel('Connecting');
             setStatusTone('neutral');
-          }}
-          onLoadEnd={() => {
-            setStatusLabel('Live');
-            setStatusTone('good');
+            setTabsReady(false);
           }}
           onError={() => {
             setStatusLabel('Load failed');
             setStatusTone('warn');
+            setTabsReady(false);
           }}
           onMessage={handleWebViewMessage}
         />
@@ -494,6 +718,111 @@ const styles = StyleSheet.create({
     borderColor: '#29e9ff44',
     backgroundColor: '#05070f',
   },
+  tabBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 7,
+    paddingVertical: 7,
+    backgroundColor: '#070d1a',
+    borderBottomWidth: 1,
+    borderBottomColor: '#29e9ff2e',
+  },
+  tabScroll: {
+    flex: 1,
+  },
+  tabScrollContent: {
+    alignItems: 'center',
+    gap: 6,
+    paddingRight: 2,
+  },
+  terminalTab: {
+    width: 132,
+    minHeight: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#ffffff12',
+    backgroundColor: '#0a1221',
+    overflow: 'hidden',
+  },
+  terminalTabActive: {
+    borderColor: '#29e9ff99',
+    backgroundColor: '#10284f',
+  },
+  terminalTabMain: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingLeft: 10,
+    paddingVertical: 6,
+  },
+  terminalTabDot: {
+    width: 7,
+    height: 7,
+    flexShrink: 0,
+    borderRadius: 999,
+  },
+  terminalTabDotRunning: {
+    backgroundColor: '#75ff8f',
+  },
+  terminalTabDotStopped: {
+    backgroundColor: '#ff8b7c',
+  },
+  terminalTabCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 1,
+  },
+  terminalTabTitle: {
+    color: '#a9bed0',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  terminalTabTitleActive: {
+    color: '#f4fbff',
+  },
+  terminalTabCommand: {
+    color: '#6f8aa1',
+    fontSize: 9,
+    fontWeight: '600',
+  },
+  terminalTabClose: {
+    width: 28,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  terminalTabCloseText: {
+    color: '#8ca7bc',
+    fontSize: 20,
+    lineHeight: 22,
+    fontWeight: '500',
+  },
+  addTerminalButton: {
+    width: 44,
+    height: 44,
+    flexShrink: 0,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#123456',
+    borderWidth: 1,
+    borderColor: '#29e9ffaa',
+  },
+  addTerminalButtonDisabled: {
+    opacity: 0.38,
+  },
+  addTerminalButtonText: {
+    color: '#6ffff0',
+    fontSize: 25,
+    lineHeight: 27,
+    fontWeight: '500',
+  },
   terminalChrome: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -505,6 +834,8 @@ const styles = StyleSheet.create({
     borderBottomColor: '#29e9ff22',
   },
   terminalChromeTitle: {
+    flex: 1,
+    marginRight: 8,
     color: '#6ffff0',
     fontSize: 11,
     fontWeight: '700',
