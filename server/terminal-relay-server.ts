@@ -114,37 +114,6 @@ function getWebUI() {
         linear-gradient(90deg, rgba(41,233,255,.035) 1px, transparent 1px);
       background-size: 24px 24px;
     }
-    /* --- slim neon status strip --- */
-    #status {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 14px;
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      color: var(--amber);
-      flex-shrink: 0;
-      border-bottom: 1px solid var(--line);
-      background: linear-gradient(90deg, rgba(255,176,32,.08), rgba(255,46,154,.04));
-    }
-    #status::before {
-      content: '';
-      width: 9px; height: 9px; border-radius: 50%;
-      background: var(--amber);
-      box-shadow: 0 0 8px var(--amber), 0 0 16px var(--amber);
-    }
-    #status.connected {
-      color: var(--cyan);
-      background: linear-gradient(90deg, rgba(41,233,255,.10), rgba(255,46,154,.05));
-    }
-    #status.connected::before {
-      background: var(--lime);
-      box-shadow: 0 0 8px var(--lime), 0 0 16px var(--lime);
-      animation: pulse 1.6s infinite;
-    }
-    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
     /* --- terminal fills nearly all vertical space --- */
     #terminal-container {
       position: relative;
@@ -346,7 +315,6 @@ function getWebUI() {
   </style>
 </head>
 <body>
-  <div id="status">✗ Disconnected</div>
   <div id="terminal-container">
     <div id="tap-hint">Tap to type · use Select button to copy text</div>
     <div id="sel-handle-start" class="sel-handle"></div>
@@ -647,7 +615,6 @@ function getWebUI() {
     let selectMode = false;
     let isSelecting = false;
     let heartbeat = null;
-    const statusEl = document.getElementById('status');
     const tapHint = document.getElementById('tap-hint');
 
     term.onData((data) => {
@@ -670,13 +637,11 @@ function getWebUI() {
       if (selectMode) {
         selBtn.textContent = '✗ Select';
         selBtn.classList.add('select-active');
-        statusEl.textContent = '✓ Select mode — drag to highlight, then tap Copy';
       } else {
         selBtn.textContent = 'Select';
         selBtn.classList.remove('select-active');
         if (typeof endSelectionSession === 'function') endSelectionSession();
         term.focus();
-        statusEl.textContent = '✓ Connected — tap terminal to type';
       }
     }
 
@@ -784,8 +749,6 @@ function getWebUI() {
         ws.send(JSON.stringify({ type: 'register', clientType: 'phone' }));
         ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
         ws.send(JSON.stringify({ type: 'tab', action: 'list' }));
-        statusEl.className = 'connected';
-        statusEl.textContent = '✓ Connected — tap terminal to type';
         postNative({ type: 'terminalConnection', connected: true });
         term.focus();
         // Heartbeat every 30s keeps Railway's proxy from closing idle connections
@@ -810,8 +773,6 @@ function getWebUI() {
 
       ws.onclose = () => {
         clearInterval(heartbeat);
-        statusEl.className = '';
-        statusEl.textContent = '✗ Disconnected';
         postNative({ type: 'terminalConnection', connected: false });
         term.write('\\r\\n[Disconnected. Reconnecting...]\\r\\n');
         setTimeout(connect, 3000);

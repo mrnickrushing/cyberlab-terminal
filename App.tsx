@@ -2,10 +2,11 @@ import { StatusBar } from 'expo-status-bar';
 import * as Clipboard from 'expo-clipboard';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
-  Linking,
+  Animated,
+  Easing,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -19,7 +20,7 @@ const TERMINAL_URL = 'https://terminal.vitallity.org';
 const TEMP_FILE_HOST = 'https://catbox.moe/user/api.php';
 const MAX_TERMINAL_TABS = 6;
 
-type StatusTone = 'neutral' | 'good' | 'warn';
+type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'error';
 
 type TerminalTab = {
   id: string;
@@ -41,8 +42,8 @@ const INITIAL_TERMINAL_TAB: TerminalTab = {
 
 export default function App() {
   const [webKey, setWebKey] = useState(0);
-  const [statusLabel, setStatusLabel] = useState('Connecting');
-  const [statusTone, setStatusTone] = useState<StatusTone>('neutral');
+  const [connectionState, setConnectionState] =
+    useState<ConnectionState>('connecting');
   const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>([
     INITIAL_TERMINAL_TAB,
   ]);
@@ -53,23 +54,69 @@ export default function App() {
     terminalTitle: string;
   } | null>(null);
   const webViewRef = useRef<WebView>(null);
+  const connectionPulse = useRef(new Animated.Value(0)).current;
   const activeTerminal =
     terminalTabs.find((terminal) => terminal.active) ?? terminalTabs[0];
+  const statusLabel =
+    connectionState === 'live'
+      ? 'Live'
+      : connectionState === 'reconnecting'
+        ? 'Reconnecting'
+        : connectionState === 'error'
+          ? 'Offline'
+          : 'Connecting';
+  const statusTone =
+    connectionState === 'live'
+      ? 'good'
+      : connectionState === 'error'
+        ? 'warn'
+        : 'neutral';
+
+  useEffect(() => {
+    connectionPulse.stopAnimation();
+    connectionPulse.setValue(0);
+    if (connectionState !== 'live') return;
+
+    const animation = Animated.loop(
+      Animated.sequence([
+        Animated.timing(connectionPulse, {
+          toValue: 1,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+        Animated.timing(connectionPulse, {
+          toValue: 0,
+          duration: 850,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [connectionPulse, connectionState]);
+
+  const pulseScale = connectionPulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 1.14],
+  });
+  const pulseOpacity = connectionPulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.58, 0],
+  });
+  const dotOpacity = connectionPulse.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0.42],
+  });
 
   function reloadTerminal() {
-    setStatusLabel('Reconnecting');
-    setStatusTone('neutral');
+    setConnectionState('reconnecting');
     setTabsReady(false);
     setWebKey((current) => current + 1);
   }
 
-  async function openInBrowser() {
-    await Linking.openURL(TERMINAL_URL);
-  }
-
   function openCopyMode() {
-    setStatusLabel('Copy Mode');
-    setStatusTone('neutral');
     webViewRef.current?.injectJavaScript(`
       if (typeof toggleSelectMode === 'function') {
         toggleSelectMode();
@@ -83,8 +130,10 @@ export default function App() {
     terminalId?: string,
   ) {
     if (!webViewRef.current) {
-      setStatusLabel('Terminal unavailable');
-      setStatusTone('warn');
+      Alert.alert(
+        'Terminal unavailable',
+        'The terminal is still connecting. Try again in a moment.',
+      );
       return;
     }
 
@@ -104,11 +153,7 @@ export default function App() {
   }
 
   function createTerminalTab() {
-    if (!tabsReady) {
-      setStatusLabel('Tabs still connecting');
-      setStatusTone('neutral');
-      return;
-    }
+    if (!tabsReady) return;
     if (terminalTabs.length >= MAX_TERMINAL_TABS) {
       Alert.alert(
         'Tab limit reached',
@@ -116,8 +161,6 @@ export default function App() {
       );
       return;
     }
-    setStatusLabel('Opening terminal');
-    setStatusTone('neutral');
     sendTerminalTabAction('create');
   }
 
@@ -126,8 +169,6 @@ export default function App() {
     setTerminalTabs((current) =>
       current.map((item) => ({ ...item, active: item.id === terminal.id })),
     );
-    setStatusLabel(`Switching to ${terminal.title}`);
-    setStatusTone('neutral');
     sendTerminalTabAction('select', terminal.id);
   }
 
@@ -142,8 +183,6 @@ export default function App() {
           text: 'Close Terminal',
           style: 'destructive',
           onPress: () => {
-            setStatusLabel(`Closing ${terminal.title}`);
-            setStatusTone('neutral');
             sendTerminalTabAction('close', terminal.id);
           },
         },
@@ -181,8 +220,7 @@ export default function App() {
 
     if (type === 'terminalConnection') {
       const connected = (payload as { connected?: unknown }).connected === true;
-      setStatusLabel(connected ? 'Live' : 'Reconnecting');
-      setStatusTone(connected ? 'good' : 'warn');
+      setConnectionState(connected ? 'live' : 'reconnecting');
       if (!connected) setTabsReady(false);
       return;
     }
@@ -206,16 +244,13 @@ export default function App() {
       setTerminalTabs(nextTabs);
       setTabsReady(true);
       const active = nextTabs.find((tab) => tab.active) ?? nextTabs[0];
-      setStatusLabel(`${active.title} live`);
-      setStatusTone(active.running ? 'good' : 'warn');
+      setConnectionState(active.running ? 'live' : 'error');
       return;
     }
 
     if (type === 'terminalTabError') {
       const message = (payload as { message?: unknown }).message;
       const detail = typeof message === 'string' ? message : 'Terminal tab action failed.';
-      setStatusLabel('Tab action failed');
-      setStatusTone('warn');
       Alert.alert('Terminal tabs', detail);
       return;
     }
@@ -226,14 +261,10 @@ export default function App() {
 
     try {
       await Clipboard.setStringAsync(text);
-      setStatusLabel('Copied to clipboard');
-      setStatusTone('good');
       webViewRef.current?.injectJavaScript(
         'if (window.__onCopyAck) { window.__onCopyAck(true); } true;'
       );
     } catch (error) {
-      setStatusLabel('Copy failed');
-      setStatusTone('warn');
       webViewRef.current?.injectJavaScript(
         'if (window.__onCopyAck) { window.__onCopyAck(false); } true;'
       );
@@ -247,8 +278,6 @@ export default function App() {
         : typeof error === 'string'
           ? error
           : 'unknown error';
-    setStatusLabel(`${stage} failed`);
-    setStatusTone('warn');
     Alert.alert('Upload failed', `${stage} failed: ${detail}`);
   }
 
@@ -259,8 +288,6 @@ export default function App() {
       : 'the active terminal';
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      setStatusLabel('Photos blocked');
-      setStatusTone('warn');
       Alert.alert(
         'Photos access needed',
         'Allow photo library access so you can pick a screenshot from your phone.',
@@ -275,11 +302,7 @@ export default function App() {
       base64: true,
     });
 
-    if (result.canceled || !result.assets.length) {
-      setStatusLabel('Picker canceled');
-      setStatusTone('neutral');
-      return;
-    }
+    if (result.canceled || !result.assets.length) return;
 
     const asset = result.assets[0];
     const name = asset.fileName ?? `screenshot-${Date.now()}.jpg`;
@@ -296,8 +319,6 @@ export default function App() {
       .replace(/^_+|_+$/g, '')
       .slice(0, 48) || 'screenshot';
     const tempFileUri = `${FileSystem.cacheDirectory ?? FileSystem.documentDirectory}${safeBaseName}-${Date.now()}.${ext}`;
-    setStatusLabel('Preparing screenshot');
-    setStatusTone('neutral');
     if (!asset.base64) {
       failUpload('Read photo library', 'no base64 payload from picker');
       return;
@@ -363,8 +384,6 @@ export default function App() {
       }
 
       const downloadCommand = `curl -fsSL ${JSON.stringify(uploadUrl)} -o /tmp/${safeBaseName}-${Date.now()}.${ext}`;
-      setStatusLabel('Sending command');
-      setStatusTone('good');
       typeCommandIntoTerminal(downloadCommand, targetTerminalId);
       setPickedScreenshot(null);
       return;
@@ -389,8 +408,28 @@ export default function App() {
           <Text style={styles.title}>Terminal Shell</Text>
         </View>
 
-        <View style={styles.statusPill}>
-          <View
+        <Animated.View
+          accessible
+          accessibilityLabel={`Terminal status: ${statusLabel}`}
+          accessibilityLiveRegion="polite"
+          style={[
+            styles.statusPill,
+            connectionState === 'live' ? styles.statusPillLive : null,
+          ]}
+        >
+          {connectionState === 'live' ? (
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.statusPulseRing,
+                {
+                  opacity: pulseOpacity,
+                  transform: [{ scale: pulseScale }],
+                },
+              ]}
+            />
+          ) : null}
+          <Animated.View
             style={[
               styles.statusDot,
               statusTone === 'good'
@@ -398,10 +437,18 @@ export default function App() {
                 : statusTone === 'warn'
                   ? styles.statusDotWarn
                   : styles.statusDotNeutral,
+              connectionState === 'live' ? { opacity: dotOpacity } : null,
             ]}
           />
-          <Text style={styles.statusText}>{statusLabel}</Text>
-        </View>
+          <Text
+            style={[
+              styles.statusText,
+              connectionState === 'live' ? styles.statusTextLive : null,
+            ]}
+          >
+            {statusLabel}
+          </Text>
+        </Animated.View>
       </View>
 
       <View style={styles.actionRow}>
@@ -413,9 +460,6 @@ export default function App() {
         </Pressable>
         <Pressable onPress={openCopyMode} style={[styles.actionButton, styles.actionAccent]}>
           <Text style={[styles.actionText, styles.actionTextAccent]}>✂  Copy</Text>
-        </Pressable>
-        <Pressable onPress={openInBrowser} style={styles.actionButton}>
-          <Text style={styles.actionText}>⇱  Safari</Text>
         </Pressable>
       </View>
 
@@ -512,13 +556,6 @@ export default function App() {
           </Pressable>
         </View>
 
-        <Pressable onLongPress={openCopyMode} delayLongPress={280} style={styles.terminalChrome}>
-          <Text style={styles.terminalChromeTitle} numberOfLines={1}>
-            ● ● ●   {activeTerminal?.title ?? 'Terminal'} · terminal.vitallity.org
-          </Text>
-          <Text style={styles.terminalChromeMeta}>long-press to select</Text>
-        </Pressable>
-
         <WebView
           ref={webViewRef}
           key={webKey}
@@ -533,13 +570,11 @@ export default function App() {
           bounces={false}
           startInLoadingState
           onLoadStart={() => {
-            setStatusLabel('Connecting');
-            setStatusTone('neutral');
+            setConnectionState('connecting');
             setTabsReady(false);
           }}
           onError={() => {
-            setStatusLabel('Load failed');
-            setStatusTone('warn');
+            setConnectionState('error');
             setTabsReady(false);
           }}
           onMessage={handleWebViewMessage}
@@ -581,6 +616,7 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   statusPill: {
+    position: 'relative',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -591,6 +627,25 @@ const styles = StyleSheet.create({
     backgroundColor: '#0a0f1e',
     borderWidth: 1,
     borderColor: '#1b2b45',
+  },
+  statusPillLive: {
+    backgroundColor: '#07160f',
+    borderColor: '#00ff9c99',
+    shadowColor: '#00ff9c',
+    shadowOpacity: 0.62,
+    shadowRadius: 11,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 8,
+  },
+  statusPulseRing: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#00ff9c',
   },
   statusDot: {
     width: 9,
@@ -624,6 +679,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0.5,
     textTransform: 'uppercase',
+  },
+  statusTextLive: {
+    color: '#8dffc9',
   },
   actionRow: {
     flexDirection: 'row',
@@ -822,29 +880,6 @@ const styles = StyleSheet.create({
     fontSize: 25,
     lineHeight: 27,
     fontWeight: '500',
-  },
-  terminalChrome: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 9,
-    backgroundColor: '#0a0f1e',
-    borderBottomWidth: 1,
-    borderBottomColor: '#29e9ff22',
-  },
-  terminalChromeTitle: {
-    flex: 1,
-    marginRight: 8,
-    color: '#6ffff0',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1,
-  },
-  terminalChromeMeta: {
-    color: '#5f7597',
-    fontSize: 11,
-    fontWeight: '600',
   },
   webviewContainer: {
     flex: 1,
