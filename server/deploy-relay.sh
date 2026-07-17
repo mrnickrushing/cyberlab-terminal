@@ -4,14 +4,16 @@
 #
 # The Railway service "terminal-relay" (project "Terminal-Relay") runs Railway's
 # serverless `function-bun` image. There is no git build step for it, so the
-# server code in ./terminal-relay-server.ts is shipped to the running container
-# as a single base64 environment variable (SERVER_B64) and decoded + executed at
-# boot by the service start command.
+# server code in ./terminal-relay-server.ts is gzip-compressed, shipped to the
+# running container as a single base64 environment variable (SERVER_B64), and
+# decoded + executed at boot by the service start command. Compression keeps the
+# payload below Railway's 32 KiB per-variable limit as the relay UI grows.
 #
 # IMPORTANT: do NOT hand-edit the env var in the Railway dashboard. It must stay a
-# faithful base64 of terminal-relay-server.ts. Editing it manually (or splitting
-# it into PART1/PART2/... chunks) is what previously corrupted the deploy and took
-# the site down. Always change terminal-relay-server.ts and re-run this script.
+# a faithful gzip+base64 encoding of terminal-relay-server.ts. Editing it manually
+# (or splitting it into PART1/PART2/... chunks) is what previously corrupted the
+# deploy and took the site down. Always change terminal-relay-server.ts and re-run
+# this script.
 #
 # Usage:
 #   RAILWAY_TOKEN=<account-or-team-token> ./server/deploy-relay.sh
@@ -37,25 +39,39 @@ SERVER_FILE="$SCRIPT_DIR/terminal-relay-server.ts"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-START_CMD='bun -e '\''await Bun.write("/tmp/server.ts", Uint8Array.from(atob(Bun.env.SERVER_B64), c => c.charCodeAt(0))); await import("/tmp/server.ts");'\'''
+START_CMD='bun -e '\''await Bun.write("/tmp/server.ts", Bun.gunzipSync(Uint8Array.from(atob(Bun.env.SERVER_B64), c => c.charCodeAt(0)))); await import("/tmp/server.ts");'\'''
 
-echo "==> Encoding $SERVER_FILE"
-base64 -w0 "$SERVER_FILE" > "$WORK/server.b64"
+echo "==> Compressing and encoding $SERVER_FILE"
+gzip -9 -c "$SERVER_FILE" | base64 -w0 > "$WORK/server.b64"
 
-# Sanity check: decode must reproduce the source byte-for-byte before we ship it.
-base64 -d "$WORK/server.b64" > "$WORK/roundtrip.ts"
+# Sanity check: decode + decompress must reproduce the source byte-for-byte.
+base64 -d "$WORK/server.b64" | gzip -dc > "$WORK/roundtrip.ts"
 if ! cmp -s "$SERVER_FILE" "$WORK/roundtrip.ts"; then
-  echo "ERROR: base64 round-trip mismatch, refusing to deploy" >&2
+  echo "ERROR: gzip/base64 round-trip mismatch, refusing to deploy" >&2
   exit 1
 fi
-echo "    round-trip OK ($(wc -c < "$WORK/server.b64") base64 bytes)"
+PAYLOAD_BYTES=$(wc -c < "$WORK/server.b64")
+if [ "$PAYLOAD_BYTES" -gt 32768 ]; then
+  echo "ERROR: encoded payload is $PAYLOAD_BYTES bytes (Railway limit: 32768)" >&2
+  exit 1
+fi
+echo "    round-trip OK ($PAYLOAD_BYTES base64 bytes)"
 
 gql() {
   # gql <payload-file>
+  local response="$WORK/graphql-response.json"
   curl -fsS --max-time 60 -X POST "$API" \
     -H "Authorization: Bearer $RAILWAY_TOKEN" \
     -H "Content-Type: application/json" \
-    --data @"$1"
+    --data @"$1" > "$response"
+  python3 - "$response" <<'PY'
+import json, sys
+response = json.load(open(sys.argv[1]))
+if response.get("errors"):
+    print(json.dumps(response), file=sys.stderr)
+    raise SystemExit(1)
+print(json.dumps(response))
+PY
 }
 
 echo "==> Upserting SERVER_B64"
