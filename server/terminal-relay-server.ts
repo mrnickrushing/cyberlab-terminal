@@ -48,7 +48,7 @@ const server = serve({
           return;
         }
 
-        if ((data.type === "command" || data.type === "key" || data.type === "resize") && client.type === "phone") {
+        if ((data.type === "command" || data.type === "key" || data.type === "resize" || data.type === "tab") && client.type === "phone") {
           const laptopClient = Array.from(clients.values()).find(
             (c) => c.type === "laptop"
           );
@@ -58,7 +58,7 @@ const server = serve({
           return;
         }
 
-        if (data.type === "output" && client.type === "laptop") {
+        if ((data.type === "output" || data.type === "tabState" || data.type === "tabError") && client.type === "laptop") {
           for (const c of clients.values()) {
             if (c.type === "phone") {
               c.ws.send(JSON.stringify(data));
@@ -749,6 +749,31 @@ function getWebUI() {
       }
     }
 
+    function postNative(message) {
+      if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+        window.ReactNativeWebView.postMessage(JSON.stringify(message));
+      }
+    }
+
+    function terminalTabAction(action, tabId) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        postNative({ type: 'terminalTabError', message: 'The terminal relay is reconnecting.' });
+        return;
+      }
+      ws.send(JSON.stringify({ type: 'tab', action, tabId: tabId || null }));
+    }
+
+    function terminalTabCommand(tabId, command) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        postNative({ type: 'terminalTabError', message: 'The terminal relay is reconnecting.' });
+        return;
+      }
+      ws.send(JSON.stringify({ type: 'tab', action: 'command', tabId, command }));
+    }
+
+    window.terminalTabAction = terminalTabAction;
+    window.terminalTabCommand = terminalTabCommand;
+
     function connect() {
       if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
 
@@ -758,8 +783,10 @@ function getWebUI() {
       ws.onopen = () => {
         ws.send(JSON.stringify({ type: 'register', clientType: 'phone' }));
         ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+        ws.send(JSON.stringify({ type: 'tab', action: 'list' }));
         statusEl.className = 'connected';
         statusEl.textContent = '✓ Connected — tap terminal to type';
+        postNative({ type: 'terminalConnection', connected: true });
         term.focus();
         // Heartbeat every 30s keeps Railway's proxy from closing idle connections
         clearInterval(heartbeat);
@@ -774,6 +801,10 @@ function getWebUI() {
         const data = JSON.parse(e.data);
         if (data.type === 'output') {
           term.write(data.output);
+        } else if (data.type === 'tabState') {
+          postNative({ type: 'terminalTabs', tabs: data.tabs });
+        } else if (data.type === 'tabError') {
+          postNative({ type: 'terminalTabError', message: data.message });
         }
       };
 
@@ -781,6 +812,7 @@ function getWebUI() {
         clearInterval(heartbeat);
         statusEl.className = '';
         statusEl.textContent = '✗ Disconnected';
+        postNative({ type: 'terminalConnection', connected: false });
         term.write('\\r\\n[Disconnected. Reconnecting...]\\r\\n');
         setTimeout(connect, 3000);
       };

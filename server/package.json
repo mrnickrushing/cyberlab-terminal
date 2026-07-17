@@ -1,0 +1,14 @@
+{
+  "name": "cyberlab-terminal-server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "laptop": "tsx laptop-client.ts"
+  },
+  "dependencies": {
+    "node-pty": "1.1.0"
+  },
+  "devDependencies": {
+    "tsx": "4.20.6"
+  }
+}

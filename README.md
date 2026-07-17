@@ -24,6 +24,43 @@ CyberLab Terminal is a focused Expo app for connecting to the live terminal at `
 npm start
 ```
 
+## OTA updates
+
+EAS Update is configured for the Expo project
+`@rushingtechnologies/cyberlab-terminal`. Release builds use the app version as
+their runtime version and the `production` channel. On app launch, a release
+build downloads the latest compatible update in the background and applies it
+on the next restart.
+
+Validate the local update configuration before publishing:
+
+```bash
+npm run validate:ota
+```
+
+Publish to a preview build first:
+
+```bash
+npm run ota:preview -- --message "Describe the update"
+```
+
+After testing, publish the same commit to production:
+
+```bash
+npm run ota:production -- --message "Describe the update"
+```
+
+The Codemagic `ota-update` workflow also publishes JS-only commits pushed to
+`main` directly to the production channel. It skips changes to dependencies,
+Expo/build configuration, and native projects because those changes require a
+new binary. When native code or Expo config changes, bump the matching version
+in both `app.json` and `package.json`, then create and install a new release
+build before publishing updates for the new runtime.
+
+To verify an update on a release build, launch the app once so it can download
+the update, then fully close and reopen it. Expo Go cannot load updates that use
+a runtime version.
+
 ## Terminal relay server (Railway)
 
 The app's WebView points at `https://terminal.vitallity.org`, which is the relay
@@ -53,7 +90,7 @@ Bundle identifier is currently set to `com.cyberlabterminal.app`. Adjust if need
 
 ## Codemagic
 
-This repo includes [codemagic.yaml](/home/Nitehawk/Desktop/cyberlab-terminal/codemagic.yaml) with:
+This repo includes [codemagic.yaml](codemagic.yaml) with:
 
 - `validate` for config and TypeScript checks
 - `ota-update` for EAS Update publishes to the `production` branch

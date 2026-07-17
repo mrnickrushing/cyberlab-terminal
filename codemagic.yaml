@@ -16,6 +16,7 @@ workflows:
         script: |
           npx expo config --type public --json > /tmp/expo-config.json
           node -e "const app=require('/tmp/expo-config.json'); if (app.ios.bundleIdentifier !== 'com.cyberlabterminal.app') throw new Error('Unexpected iOS bundle identifier: ' + app.ios.bundleIdentifier);"
+          npm run validate:ota
 
   ota-update:
     name: Expo OTA Update
@@ -36,6 +37,9 @@ workflows:
       - name: Install dependencies
         script: |
           npm ci --prefer-offline=false
+      - name: Validate OTA config
+        script: |
+          npm run validate:ota
       - name: Decide whether this commit is JS-only
         script: |
           CHANGED=$(git diff --name-only HEAD~1 HEAD || git ls-files)
@@ -56,8 +60,9 @@ workflows:
             echo "EXPO_TOKEN env var is not set. Add it to the expo_credentials group in Codemagic."
             exit 1
           fi
-          npx eas-cli update \
-            --branch production \
+          npx --yes eas-cli@21.0.1 update \
+            --channel production \
+            --environment production \
             --message "$CM_COMMIT $(git log -1 --pretty=%s | head -c 80)" \
             --non-interactive
 
@@ -90,6 +95,7 @@ workflows:
         script: |
           npx expo config --type public --json > /tmp/expo-config.json
           node -e "const app=require('/tmp/expo-config.json'); if (app.ios.bundleIdentifier !== process.env.BUNDLE_ID) throw new Error('Unexpected iOS bundle identifier: ' + app.ios.bundleIdentifier);"
+          npm run validate:ota
       - name: Validate App Store Connect credentials
         script: |
           if [ -z "$APP_STORE_CONNECT_PRIVATE_KEY" ] || [ -z "$APP_STORE_CONNECT_KEY_IDENTIFIER" ] || [ -z "$APP_STORE_CONNECT_ISSUER_ID" ]; then

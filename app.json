@@ -2,17 +2,12 @@
   "expo": {
     "name": "CyberLab Terminal",
     "slug": "cyberlab-terminal",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "orientation": "default",
+    "platforms": ["ios", "android"],
     "icon": "./assets/icon.png",
     "scheme": "cyberlabterminal",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": true,
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#050816"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.cyberlabterminal.app",
@@ -26,6 +21,15 @@
         "expo-image-picker",
         {
           "photosPermission": "Allow CyberLab Terminal to select screenshots from your photo library."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#050816"
         }
       ]
     ],
