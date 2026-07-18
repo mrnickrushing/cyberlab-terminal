@@ -143,10 +143,23 @@ function getWebUI() {
       position: relative;
       z-index: 1;
     }
+    #terminal-container .xterm-viewport {
+      overflow-y: scroll !important;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-y: contain;
+      touch-action: pan-y;
+    }
     #terminal-container .xterm * {
       -webkit-user-select: none;
       user-select: none;
       -webkit-touch-callout: none;
+    }
+    #selection-capture {
+      display: none;
+      position: absolute;
+      inset: 0;
+      z-index: 10;
+      touch-action: none;
     }
     #tap-hint {
       position: absolute;
@@ -316,6 +329,7 @@ function getWebUI() {
 </head>
 <body>
   <div id="terminal-container">
+    <div id="selection-capture" aria-hidden="true"></div>
     <div id="tap-hint">Tap to type · use Select button to copy text</div>
     <div id="sel-handle-start" class="sel-handle"></div>
     <div id="sel-handle-end" class="sel-handle"></div>
@@ -374,19 +388,16 @@ function getWebUI() {
     // accidentally open the selection UI.
     (function setupSelection() {
       const container = document.getElementById('terminal-container');
+      const selectionCapture = document.getElementById('selection-capture');
       const handleA = document.getElementById('sel-handle-start');
       const handleB = document.getElementById('sel-handle-end');
       const toolbar = document.getElementById('sel-toolbar');
       const copyBtn = document.getElementById('sel-copy-btn');
       const cancelBtn = document.getElementById('sel-cancel-btn');
 
-      const MOVE_THRESHOLD = 10; // px; tracks finger jitter so taps don't count as moves
-
       let anchorA = null; // raw cell tied to handleA / the selection's lower bound
       let anchorB = null; // raw cell tied to handleB / the selection's upper bound
-      let mode = 'idle'; // idle | maybeClear | dragLegacy
-      let touchStartPos = null;
-      let touchMoved = false;
+      let mode = 'idle'; // idle | dragLegacy
 
       function getCell(touch) {
         const rect = container.getBoundingClientRect();
@@ -524,53 +535,32 @@ function getWebUI() {
       bindToolbarButton(cancelBtn, endSelectionSession);
       bindToolbarButton(copyBtn, copySelectionText);
 
-      container.addEventListener('touchstart', (e) => {
+      // Keep selection gestures on an opt-in overlay. In normal mode xterm's
+      // viewport receives the touch stream directly, which preserves native
+      // vertical and momentum scrolling inside iOS/Android WebViews.
+      selectionCapture.addEventListener('touchstart', (e) => {
+        e.preventDefault();
         const touch = e.touches[0];
-        touchStartPos = { x: touch.clientX, y: touch.clientY };
-        touchMoved = false;
         const cell = getCell(touch);
-
-        if (selectMode) {
-          e.preventDefault();
-          mode = 'dragLegacy';
-          anchorA = cell;
-          anchorB = cell;
-          setSelection(anchorA, anchorB);
-          return;
-        }
-
-        mode = isSelecting ? 'maybeClear' : 'idle';
+        mode = 'dragLegacy';
+        anchorA = cell;
+        anchorB = cell;
+        setSelection(anchorA, anchorB);
       }, { passive: false });
 
-      container.addEventListener('touchmove', (e) => {
-        const touch = e.touches[0];
-        if (!touchMoved && touchStartPos) {
-          const dist = Math.hypot(touch.clientX - touchStartPos.x, touch.clientY - touchStartPos.y);
-          if (dist > MOVE_THRESHOLD) {
-            touchMoved = true;
-          }
-        }
+      selectionCapture.addEventListener('touchmove', (e) => {
         if (mode === 'dragLegacy') {
           e.preventDefault();
-          anchorB = getCell(touch);
+          anchorB = getCell(e.touches[0]);
           setSelection(anchorA, anchorB);
         }
       }, { passive: false });
 
-      container.addEventListener('touchend', (e) => {
+      selectionCapture.addEventListener('touchend', (e) => {
         if (mode === 'dragLegacy') {
+          e.preventDefault();
           mode = 'idle';
-          return;
         }
-        if (!touchMoved) {
-          if (mode === 'maybeClear') {
-            endSelectionSession();
-          } else if (!isSelecting) {
-            term.focus();
-            tapHint.style.opacity = '0';
-          }
-        }
-        mode = 'idle';
       }, { passive: false });
 
       window.endSelectionSession = endSelectionSession;
@@ -634,6 +624,8 @@ function getWebUI() {
     function toggleSelectMode() {
       selectMode = !selectMode;
       const selBtn = document.getElementById('sel-btn');
+      const selectionCapture = document.getElementById('selection-capture');
+      selectionCapture.style.display = selectMode ? 'block' : 'none';
       if (selectMode) {
         selBtn.textContent = '✗ Select';
         selBtn.classList.add('select-active');

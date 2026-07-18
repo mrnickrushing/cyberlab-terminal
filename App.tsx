@@ -567,6 +567,8 @@ export default function App() {
           domStorageEnabled
           allowsBackForwardNavigationGestures={false}
           setSupportMultipleWindows={false}
+          scrollEnabled
+          nestedScrollEnabled
           bounces={false}
           startInLoadingState
           onLoadStart={() => {
