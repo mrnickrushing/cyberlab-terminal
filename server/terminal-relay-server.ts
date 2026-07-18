@@ -583,8 +583,11 @@ function getWebUI() {
           anchorB = getCell(touch);
           setSelection(anchorA, anchorB);
         } else if (touchMoved && !isSelecting) {
-          // Plain single-finger drag (not selecting): scroll the scrollback buffer.
-          // Content follows the finger, like a native scroll view.
+          // Plain single-finger drag (not selecting): scroll tmux's scrollback.
+          // The laptop attaches to tmux, which runs on the alternate screen, so
+          // xterm keeps no scrollback of its own — the history lives in tmux.
+          // Translate the drag into tmux copy-mode scroll requests instead
+          // (dragging the content down reveals older output, like a scroll view).
           e.preventDefault();
           const rect = container.getBoundingClientRect();
           const cellH = (rect.height - 8) / term.rows;
@@ -592,7 +595,7 @@ function getWebUI() {
           lastTouchY = touch.clientY;
           const rows = Math.trunc(scrollDragAccum);
           if (rows !== 0) {
-            term.scrollLines(-rows);
+            requestScroll(rows);
             scrollDragAccum -= rows;
           }
         }
@@ -659,19 +662,30 @@ function getWebUI() {
     const tapHint = document.getElementById('tap-hint');
     const scrollBottomBtn = document.getElementById('scroll-bottom-btn');
 
-    // --- scrollback: jump-to-latest indicator ---------------------------
-    // Once the user scrolls up, xterm stops auto-following new output (so
-    // history stays readable). Surface a button so it's obvious how to
-    // get back to the live tail instead of it looking "stuck".
-    function updateScrollIndicator() {
-      const buf = term.buffer.active;
-      const atBottom = buf.viewportY >= buf.baseY;
-      scrollBottomBtn.style.display = atBottom ? 'none' : 'flex';
+    // --- scrollback: drive tmux copy-mode from the phone ----------------
+    // The laptop runs tmux (alternate screen), so scrollback lives in tmux,
+    // not xterm. A drag sends 'scroll' tab actions (positive delta = back
+    // into history); the laptop enters copy-mode and scrolls. Once the user
+    // is scrolled back, show a "Latest" button that cancels copy-mode and
+    // snaps back to the live tail.
+    let scrolledBack = false;
+    let lastScrollAt = 0;
+    function showLatestButton(show) {
+      scrolledBack = show;
+      scrollBottomBtn.style.display = show ? 'flex' : 'none';
     }
-    term.onScroll(updateScrollIndicator);
+    function requestScroll(delta) {
+      if (!delta || !ws || ws.readyState !== WebSocket.OPEN) return;
+      lastScrollAt = Date.now();
+      ws.send(JSON.stringify({ type: 'tab', action: 'scroll', delta }));
+      if (delta > 0 && !scrolledBack) showLatestButton(true);
+    }
     function jumpToLatest() {
-      term.scrollToBottom();
-      updateScrollIndicator();
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        lastScrollAt = Date.now();
+        ws.send(JSON.stringify({ type: 'tab', action: 'scrollReset' }));
+      }
+      showLatestButton(false);
       term.focus();
     }
     scrollBottomBtn.addEventListener('touchend', (e) => {
@@ -788,6 +802,9 @@ function getWebUI() {
         postNative({ type: 'terminalTabError', message: 'The terminal relay is reconnecting.' });
         return;
       }
+      // Switching/creating/closing a tab shows a fresh live view (the laptop
+      // cancels copy-mode on select), so drop any stale scrolled-back state.
+      if (action !== 'list') showLatestButton(false);
       ws.send(JSON.stringify({ type: 'tab', action, tabId: tabId || null }));
     }
 
@@ -813,6 +830,7 @@ function getWebUI() {
         ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
         ws.send(JSON.stringify({ type: 'tab', action: 'list' }));
         postNative({ type: 'terminalConnection', connected: true });
+        showLatestButton(false);
         term.focus();
         // Heartbeat every 30s keeps Railway's proxy from closing idle connections
         clearInterval(heartbeat);
@@ -826,10 +844,13 @@ function getWebUI() {
       ws.onmessage = (e) => {
         const data = JSON.parse(e.data);
         if (data.type === 'output') {
-          term.write(data.output, updateScrollIndicator);
+          term.write(data.output);
         } else if (data.type === 'tabState') {
           postNative({ type: 'terminalTabs', tabs: data.tabs });
         } else if (data.type === 'tabError') {
+          // Swallow errors caused by scroll requests (e.g. a laptop client
+          // that predates copy-mode scrolling) so swiping never spams alerts.
+          if (Date.now() - lastScrollAt < 2000) return;
           postNative({ type: 'terminalTabError', message: data.message });
         }
       };
