@@ -17,6 +17,7 @@ type RelayMessage = {
   sequence?: string;
   cols?: number;
   rows?: number;
+  delta?: number;
 };
 
 type TerminalTab = {
@@ -62,6 +63,8 @@ async function ensureTmuxSession() {
 
   await runTmux(["set-option", "-t", TMUX_SESSION, "base-index", "0"]);
   await runTmux(["set-option", "-t", TMUX_SESSION, "renumber-windows", "on"]);
+  // Keep plenty of scrollback so the phone can page back through history.
+  await runTmux(["set-option", "-g", "history-limit", "50000"]);
 }
 
 async function listTerminalTabs(): Promise<TerminalTab[]> {
@@ -194,6 +197,39 @@ async function handleTabAction(message: RelayMessage) {
       }
       await runTmux(["send-keys", "-t", tab.id, "-l", message.command]);
       await runTmux(["send-keys", "-t", tab.id, "Enter"]);
+      return;
+    }
+    case "scroll": {
+      // The phone drags to scroll tmux's history. Positive delta scrolls back
+      // into scrollback, negative scrolls toward the live tail. We drive the
+      // active pane's copy-mode the same way tmux's own mouse-wheel binding
+      // does (send -N<count> -X scroll-up / scroll-down).
+      const delta = Math.trunc(Number(message.delta) || 0);
+      if (!delta) return;
+      const count = String(Math.min(2000, Math.abs(delta)));
+      if (delta > 0) {
+        // copy-mode -e exits automatically once the user scrolls back to the
+        // bottom, so dragging down to the end snaps back to live output.
+        await runTmux(["copy-mode", "-e", "-t", TMUX_SESSION]);
+        await runTmux(["send-keys", "-t", TMUX_SESSION, "-N", count, "-X", "scroll-up"]);
+      } else {
+        const { stdout } = await runTmux([
+          "display-message", "-p", "-t", TMUX_SESSION, "#{pane_in_mode}",
+        ]);
+        if (stdout.trim() === "1") {
+          await runTmux(["send-keys", "-t", TMUX_SESSION, "-N", count, "-X", "scroll-down"]);
+        }
+      }
+      return;
+    }
+    case "scrollReset": {
+      // Snap back to the live tail by cancelling copy-mode. Harmless if the
+      // pane is not currently in copy-mode.
+      try {
+        await runTmux(["send-keys", "-t", TMUX_SESSION, "-X", "cancel"]);
+      } catch {
+        // Not in copy-mode; nothing to reset.
+      }
       return;
     }
     default:
