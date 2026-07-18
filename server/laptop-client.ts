@@ -178,6 +178,14 @@ async function handleTabAction(message: RelayMessage) {
     case "select": {
       const tab = await requireTerminalTab(message.tabId);
       await runTmux(["select-window", "-t", tab.id]);
+      // Always show live output when switching in: a tab left in copy-mode
+      // (scrolled back, then switched away from) would otherwise keep eating
+      // keystrokes with no visible way to reset it. Harmless if not in a mode.
+      try {
+        await runTmux(["send-keys", "-t", tab.id, "-X", "cancel"]);
+      } catch {
+        // Not in copy-mode; nothing to cancel.
+      }
       await sendTabState(true);
       return;
     }

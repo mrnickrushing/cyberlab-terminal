@@ -802,6 +802,9 @@ function getWebUI() {
         postNative({ type: 'terminalTabError', message: 'The terminal relay is reconnecting.' });
         return;
       }
+      // Switching/creating/closing a tab shows a fresh live view (the laptop
+      // cancels copy-mode on select), so drop any stale scrolled-back state.
+      if (action !== 'list') showLatestButton(false);
       ws.send(JSON.stringify({ type: 'tab', action, tabId: tabId || null }));
     }
 
