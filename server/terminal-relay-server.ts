@@ -164,6 +164,29 @@ function getWebUI() {
       pointer-events: none;
       transition: opacity 0.5s;
     }
+    #scroll-bottom-btn {
+      display: none;
+      position: absolute;
+      bottom: 16px;
+      right: 16px;
+      z-index: 3;
+      align-items: center;
+      gap: 5px;
+      background: rgba(10,15,30,0.95);
+      border: 1px solid rgba(41,233,255,.55);
+      color: var(--cyan);
+      font-family: 'Monaco', 'Courier New', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .3px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.6), 0 0 12px rgba(41,233,255,.35);
+      touch-action: manipulation;
+    }
+    #scroll-bottom-btn:active {
+      background: rgba(41,233,255,.22);
+    }
     .sel-handle {
       display: none;
       position: absolute;
@@ -316,7 +339,8 @@ function getWebUI() {
 </head>
 <body>
   <div id="terminal-container">
-    <div id="tap-hint">Tap to type · use Select button to copy text</div>
+    <div id="tap-hint">Tap to type · swipe to scroll history</div>
+    <button id="scroll-bottom-btn" aria-label="Jump to latest output">▼ Latest</button>
     <div id="sel-handle-start" class="sel-handle"></div>
     <div id="sel-handle-end" class="sel-handle"></div>
     <div id="sel-toolbar">
@@ -387,6 +411,8 @@ function getWebUI() {
       let mode = 'idle'; // idle | maybeClear | dragLegacy
       let touchStartPos = null;
       let touchMoved = false;
+      let lastTouchY = 0;
+      let scrollDragAccum = 0; // fractional rows carried between touchmove samples
 
       function getCell(touch) {
         const rect = container.getBoundingClientRect();
@@ -528,6 +554,8 @@ function getWebUI() {
         const touch = e.touches[0];
         touchStartPos = { x: touch.clientX, y: touch.clientY };
         touchMoved = false;
+        lastTouchY = touch.clientY;
+        scrollDragAccum = 0;
         const cell = getCell(touch);
 
         if (selectMode) {
@@ -554,6 +582,19 @@ function getWebUI() {
           e.preventDefault();
           anchorB = getCell(touch);
           setSelection(anchorA, anchorB);
+        } else if (touchMoved && !isSelecting) {
+          // Plain single-finger drag (not selecting): scroll the scrollback buffer.
+          // Content follows the finger, like a native scroll view.
+          e.preventDefault();
+          const rect = container.getBoundingClientRect();
+          const cellH = (rect.height - 8) / term.rows;
+          scrollDragAccum += (touch.clientY - lastTouchY) / cellH;
+          lastTouchY = touch.clientY;
+          const rows = Math.trunc(scrollDragAccum);
+          if (rows !== 0) {
+            term.scrollLines(-rows);
+            scrollDragAccum -= rows;
+          }
         }
       }, { passive: false });
 
@@ -616,6 +657,28 @@ function getWebUI() {
     let isSelecting = false;
     let heartbeat = null;
     const tapHint = document.getElementById('tap-hint');
+    const scrollBottomBtn = document.getElementById('scroll-bottom-btn');
+
+    // --- scrollback: jump-to-latest indicator ---------------------------
+    // Once the user scrolls up, xterm stops auto-following new output (so
+    // history stays readable). Surface a button so it's obvious how to
+    // get back to the live tail instead of it looking "stuck".
+    function updateScrollIndicator() {
+      const buf = term.buffer.active;
+      const atBottom = buf.viewportY >= buf.baseY;
+      scrollBottomBtn.style.display = atBottom ? 'none' : 'flex';
+    }
+    term.onScroll(updateScrollIndicator);
+    function jumpToLatest() {
+      term.scrollToBottom();
+      updateScrollIndicator();
+      term.focus();
+    }
+    scrollBottomBtn.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      jumpToLatest();
+    }, { passive: false });
+    scrollBottomBtn.addEventListener('click', jumpToLatest);
 
     term.onData((data) => {
       if (selectMode || isSelecting) return;
@@ -763,7 +826,7 @@ function getWebUI() {
       ws.onmessage = (e) => {
         const data = JSON.parse(e.data);
         if (data.type === 'output') {
-          term.write(data.output);
+          term.write(data.output, updateScrollIndicator);
         } else if (data.type === 'tabState') {
           postNative({ type: 'terminalTabs', tabs: data.tabs });
         } else if (data.type === 'tabError') {
