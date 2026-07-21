@@ -438,10 +438,9 @@ export default function App() {
   }
 
   const accessoryKeys: {
-    key: keyof typeof KEY_SEQUENCES | 'ctrl' | 'dismiss' | 'paste';
+    key: keyof typeof KEY_SEQUENCES | 'ctrl' | 'paste';
     label: string;
     accent?: boolean;
-    wide?: boolean;
   }[] = [
     { key: 'left', label: '←', accent: true },
     { key: 'right', label: '→', accent: true },
@@ -453,7 +452,6 @@ export default function App() {
     { key: 'interrupt', label: '^C' },
     { key: 'paste', label: 'paste' },
     { key: 'backspace', label: '⌫' },
-    { key: 'dismiss', label: '⌨˅', wide: true },
   ];
 
   return (
@@ -577,17 +575,14 @@ export default function App() {
                 onPress={() =>
                   isCtrl
                     ? toggleCtrl()
-                    : cap.key === 'dismiss'
-                      ? Keyboard.dismiss()
-                      : cap.key === 'paste'
-                        ? pasteFromClipboard()
-                        : pressAccessoryKey(cap.key as keyof typeof KEY_SEQUENCES)
+                    : cap.key === 'paste'
+                      ? pasteFromClipboard()
+                      : pressAccessoryKey(cap.key as keyof typeof KEY_SEQUENCES)
                 }
                 accessibilityRole="button"
-                accessibilityLabel={cap.key === 'dismiss' ? 'Hide keyboard' : cap.label}
+                accessibilityLabel={cap.label}
                 style={({ pressed }) => [
                   styles.keyCap,
-                  cap.wide ? styles.keyCapWide : null,
                   cap.accent ? styles.keyCapAccent : null,
                   ctrlOn ? styles.keyCapArmed : null,
                   pressed ? styles.keyCapPressed : null,
@@ -892,17 +887,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
   },
   keyCap: {
-    width: 46,
-    height: 38,
+    width: 54,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 8,
     backgroundColor: '#141c2b',
     borderWidth: 1,
     borderColor: '#24334a',
-  },
-  keyCapWide: {
-    width: 64,
   },
   keyCapAccent: {
     borderColor: 'rgba(41,233,255,0.33)',
