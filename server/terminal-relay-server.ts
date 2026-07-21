@@ -631,6 +631,17 @@ function getWebUI() {
 
     window.addEventListener('resize', sendResize);
 
+    // Called from the app's font-size stepper (App.tsx injects this via
+    // window.setTerminalFontSize). Re-fitting after the size change keeps
+    // cols/rows accurate and tells the pty to resize to match.
+    function setTerminalFontSize(px) {
+      const size = Math.round(Number(px));
+      if (!Number.isFinite(size) || size < 8 || size > 32) return;
+      term.options.fontSize = size;
+      sendResize();
+    }
+    window.setTerminalFontSize = setTerminalFontSize;
+
     // --- collapsible Fn (nano) key row ---------------------------------
     // The second key row eats vertical space; collapsing it hands that
     // height back to the terminal. Preference is remembered per device.
