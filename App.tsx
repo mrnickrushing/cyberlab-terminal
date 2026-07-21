@@ -29,6 +29,7 @@ const KEY_SEQUENCES: Record<string, string> = {
   esc: '\x1b',
   tab: '\t',
   backspace: '\x7f',
+  interrupt: '\x03',
 };
 
 const DEFAULT_SNIPPETS = ['nmap -sV -T4', 'msfconsole -q', 'tcpdump -i eth0'];
@@ -133,6 +134,29 @@ export default function App() {
   function pressAccessoryKey(name: keyof typeof KEY_SEQUENCES) {
     const seq = KEY_SEQUENCES[name];
     if (seq) sendKeySequence(seq);
+  }
+
+  async function pasteFromClipboard() {
+    try {
+      const text = await Clipboard.getStringAsync();
+      if (!text) return;
+      // Bracketed paste keeps multi-line clipboard content from being
+      // interpreted as separate Enter-terminated commands by the shell.
+      webViewRef.current?.injectJavaScript(`
+        (function() {
+          const text = ${JSON.stringify(text)};
+          if (typeof sendKey === 'function') {
+            sendKey('\\x1b[200~' + text + '\\x1b[201~');
+          }
+        })();
+        true;
+      `);
+    } catch (error) {
+      Alert.alert(
+        'Paste failed',
+        error instanceof Error ? error.message : 'Could not read the clipboard.',
+      );
+    }
   }
 
   function toggleCtrl() {
@@ -414,7 +438,7 @@ export default function App() {
   }
 
   const accessoryKeys: {
-    key: keyof typeof KEY_SEQUENCES | 'ctrl' | 'dismiss';
+    key: keyof typeof KEY_SEQUENCES | 'ctrl' | 'dismiss' | 'paste';
     label: string;
     accent?: boolean;
     wide?: boolean;
@@ -426,6 +450,8 @@ export default function App() {
     { key: 'esc', label: 'esc' },
     { key: 'tab', label: 'tab' },
     { key: 'ctrl', label: 'ctrl' },
+    { key: 'interrupt', label: '^C' },
+    { key: 'paste', label: 'paste' },
     { key: 'backspace', label: '⌫' },
     { key: 'dismiss', label: '⌨˅', wide: true },
   ];
@@ -537,7 +563,11 @@ export default function App() {
 
       {/* BOTTOM DOCK: accessory key row (rides above the system keyboard) */}
       <View style={[styles.dock, { marginBottom: kbHeight }]}>
-        <View style={styles.keyRow}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.keyRow}
+        >
           {accessoryKeys.map((cap) => {
             const isCtrl = cap.key === 'ctrl';
             const ctrlOn = isCtrl && ctrlArmed;
@@ -549,7 +579,9 @@ export default function App() {
                     ? toggleCtrl()
                     : cap.key === 'dismiss'
                       ? Keyboard.dismiss()
-                      : pressAccessoryKey(cap.key as keyof typeof KEY_SEQUENCES)
+                      : cap.key === 'paste'
+                        ? pasteFromClipboard()
+                        : pressAccessoryKey(cap.key as keyof typeof KEY_SEQUENCES)
                 }
                 accessibilityRole="button"
                 accessibilityLabel={cap.key === 'dismiss' ? 'Hide keyboard' : cap.label}
@@ -562,6 +594,9 @@ export default function App() {
                 ]}
               >
                 <Text
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.7}
                   style={[
                     styles.keyCapText,
                     cap.accent ? styles.keyCapTextAccent : null,
@@ -573,7 +608,7 @@ export default function App() {
               </Pressable>
             );
           })}
-        </View>
+        </ScrollView>
       </View>
 
       {/* DRAWER */}
@@ -852,11 +887,12 @@ const styles = StyleSheet.create({
   },
   keyRow: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 6,
     paddingHorizontal: 10,
   },
   keyCap: {
-    flex: 1,
+    width: 46,
     height: 38,
     alignItems: 'center',
     justifyContent: 'center',
@@ -866,7 +902,7 @@ const styles = StyleSheet.create({
     borderColor: '#24334a',
   },
   keyCapWide: {
-    flex: 1.3,
+    width: 64,
   },
   keyCapAccent: {
     borderColor: 'rgba(41,233,255,0.33)',

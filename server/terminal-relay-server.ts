@@ -252,43 +252,21 @@ function getWebUI() {
       background: linear-gradient(180deg, rgba(255,46,154,.16), rgba(255,46,154,.03));
       box-shadow: 0 0 10px rgba(255,46,154,.25);
     }
-    /* --- neon key rows --- */
-    #keys-row, #keys-row2 {
+    /* --- neon key row: nano shortcuts + selection --- */
+    /* The arrow/Esc/Tab/^C/Paste row was removed: the native app's own
+       accessory dock (App.tsx) covers those now, and showing both was
+       redundant. This row keeps the actions the native dock doesn't have
+       (nano shortcuts, text-selection mode). */
+    #keys-row2 {
       display: flex;
       gap: 7px;
       flex-shrink: 0;
       overflow-x: auto;
       -webkit-overflow-scrolling: touch;
       scrollbar-width: none;
+      padding: 7px 8px 8px;
     }
-    #keys-row::-webkit-scrollbar, #keys-row2::-webkit-scrollbar { display: none; }
-    #keys-row { padding: 7px 8px 0; }
-    .key-btn {
-      flex: 1 0 auto;
-      min-width: 38px;
-      min-height: 46px;
-      padding: 0 6px;
-      white-space: nowrap;
-      color: var(--cyan);
-      border: 1px solid rgba(41,233,255,.32);
-      background: linear-gradient(180deg, rgba(41,233,255,.10), rgba(41,233,255,.02));
-      border-radius: 8px;
-      cursor: pointer;
-      font-size: 14px;
-      font-weight: 700;
-      font-family: 'Monaco', 'Courier New', monospace;
-      user-select: none;
-      box-shadow: inset 0 0 12px rgba(41,233,255,.06);
-      clip-path: polygon(7px 0, 100% 0, 100% calc(100% - 7px), calc(100% - 7px) 100%, 0 100%, 0 7px);
-      transition: transform .12s ease, box-shadow .12s ease, background .12s ease;
-    }
-    .key-btn:active {
-      background: linear-gradient(180deg, rgba(41,233,255,.35), rgba(41,233,255,.12));
-      box-shadow: 0 0 14px rgba(41,233,255,.55), inset 0 0 12px rgba(41,233,255,.2);
-      transform: translateY(1px);
-    }
-    .key-btn.select-active { color: var(--amber); border-color: rgba(255,176,32,.5); background: linear-gradient(180deg, rgba(255,176,32,.2), rgba(255,176,32,.05)); box-shadow: 0 0 14px rgba(255,176,32,.4); }
-    #keys-row2 { padding: 7px 8px 8px; }
+    #keys-row2::-webkit-scrollbar { display: none; }
     .key-btn2 {
       flex: 1 0 auto;
       min-width: 40px;
@@ -313,28 +291,7 @@ function getWebUI() {
       box-shadow: 0 0 12px rgba(0,255,156,.45), inset 0 0 10px rgba(0,255,156,.18);
       transform: translateY(1px);
     }
-    /* --- collapse handle for the Fn (nano) key row --- */
-    #keys-toggle {
-      flex-shrink: 0;
-      align-self: center;
-      margin: 8px auto 0;
-      padding: 4px 20px;
-      border-radius: 999px;
-      border: 1px solid rgba(41,233,255,.28);
-      background: rgba(10,15,30,.9);
-      color: var(--cyan);
-      font-size: 11px;
-      font-weight: 700;
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      font-family: 'Monaco', 'Courier New', monospace;
-      cursor: pointer;
-      box-shadow: inset 0 0 10px rgba(41,233,255,.06);
-    }
-    #keys-toggle:active {
-      background: rgba(41,233,255,.18);
-      box-shadow: 0 0 12px rgba(41,233,255,.4);
-    }
+    .key-btn2.select-active { color: var(--amber); border-color: rgba(255,176,32,.5); background: linear-gradient(180deg, rgba(255,176,32,.2), rgba(255,176,32,.05)); box-shadow: 0 0 14px rgba(255,176,32,.4); }
   </style>
 </head>
 <body>
@@ -348,17 +305,6 @@ function getWebUI() {
       <button id="sel-cancel-btn" class="sel-toolbar-btn">✕</button>
     </div>
   </div>
-  <div id="keys-row">
-    <button class="key-btn" onclick="sendKey('\\x1b[A')">▲</button>
-    <button class="key-btn" onclick="sendKey('\\x1b[B')">▼</button>
-    <button class="key-btn" onclick="sendKey('\\x1b[D')">◀</button>
-    <button class="key-btn" onclick="sendKey('\\x1b[C')">▶</button>
-    <button class="key-btn" onclick="sendKey('\\x1b')">Esc</button>
-    <button class="key-btn" onclick="sendKey('\\t')">Tab</button>
-    <button class="key-btn" onclick="sendKey('\\x03')">^C</button>
-    <button class="key-btn" onclick="pasteClipboard()">Paste</button>
-  </div>
-  <button id="keys-toggle" onclick="toggleKeysRow()" aria-label="Toggle Fn keys">▾ Fn keys</button>
   <div id="keys-row2">
     <button class="key-btn2" onclick="sendKey('\\x18')">^X Exit</button>
     <button class="key-btn2" onclick="sendKey('\\x0f')">^O Save</button>
@@ -641,30 +587,6 @@ function getWebUI() {
       sendResize();
     }
     window.setTerminalFontSize = setTerminalFontSize;
-
-    // --- collapsible Fn (nano) key row ---------------------------------
-    // The second key row eats vertical space; collapsing it hands that
-    // height back to the terminal. Preference is remembered per device.
-    function applyKeysRow(show) {
-      const row2 = document.getElementById('keys-row2');
-      const btn = document.getElementById('keys-toggle');
-      if (!row2 || !btn) return;
-      row2.style.display = show ? 'flex' : 'none';
-      btn.textContent = (show ? '\u25be' : '\u25b4') + ' Fn keys';
-      try { localStorage.setItem('cyberlab_fnrow', show ? '1' : '0'); } catch (e) {}
-    }
-    function toggleKeysRow() {
-      const row2 = document.getElementById('keys-row2');
-      const show = row2.style.display === 'none';
-      applyKeysRow(show);
-      // let layout settle, then refit the terminal into the reclaimed space
-      setTimeout(sendResize, 60);
-    }
-    (function initKeysRow() {
-      let show = true;
-      try { if (localStorage.getItem('cyberlab_fnrow') === '0') show = false; } catch (e) {}
-      applyKeysRow(show);
-    })();
 
     let ws = null;
     let selectMode = false;
