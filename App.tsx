@@ -112,6 +112,21 @@ export default function App() {
     };
   }, []);
 
+  // The dock's marginBottom (above) shrinks the WebView's flex:1 container
+  // to make room for the keyboard, but the terminal inside never re-fits to
+  // that smaller size on its own — so its bottom rows end up rendered below
+  // the visible viewport instead of reflowing into it. Nudge a re-fit once
+  // RN's layout pass has settled.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      webViewRef.current?.injectJavaScript(`
+        if (typeof window.sendResize === 'function') { window.sendResize(); }
+        true;
+      `);
+    }, 80);
+    return () => clearTimeout(timer);
+  }, [kbHeight, webKey]);
+
   function reloadTerminal() {
     setConnectionState('reconnecting');
     setTabsReady(false);
