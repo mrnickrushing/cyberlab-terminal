@@ -2,8 +2,10 @@ import { StatusBar } from 'expo-status-bar';
 import * as Clipboard from 'expo-clipboard';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
+import * as Updates from 'expo-updates';
 import { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Keyboard,
   Modal,
@@ -68,6 +70,8 @@ export default function App() {
   const [ctrlArmed, setCtrlArmed] = useState(false);
   const [kbHeight, setKbHeight] = useState(0);
   const [snippets, setSnippets] = useState<string[]>(DEFAULT_SNIPPETS);
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [updateStatusText, setUpdateStatusText] = useState<string | null>(null);
   const webViewRef = useRef<WebView>(null);
 
   const activeTerminal =
@@ -132,6 +136,53 @@ export default function App() {
     setTabsReady(false);
     setDrawerOpen(false);
     setWebKey((current) => current + 1);
+  }
+
+  const currentUpdateLabel = Updates.isEmbeddedLaunch
+    ? 'Embedded build (no update applied)'
+    : Updates.updateId
+      ? `${Updates.updateId.slice(0, 8)} · ${
+          Updates.createdAt ? Updates.createdAt.toLocaleString() : 'unknown date'
+        }`
+      : 'Unknown';
+
+  async function checkForUpdates() {
+    if (checkingUpdate) return;
+    setCheckingUpdate(true);
+    setUpdateStatusText(null);
+    try {
+      if (!Updates.isEnabled) {
+        setUpdateStatusText('Updates are disabled in this build.');
+        return;
+      }
+      const result = await Updates.checkForUpdateAsync();
+      if (!result.isAvailable) {
+        setUpdateStatusText("You're up to date.");
+        return;
+      }
+      setUpdateStatusText('Downloading update…');
+      await Updates.fetchUpdateAsync();
+      setUpdateStatusText('Update downloaded.');
+      Alert.alert(
+        'Update ready',
+        'A new version has been downloaded. Restart now to apply it?',
+        [
+          { text: 'Later', style: 'cancel' },
+          {
+            text: 'Restart',
+            onPress: () => {
+              void Updates.reloadAsync();
+            },
+          },
+        ],
+      );
+    } catch (error) {
+      setUpdateStatusText(
+        error instanceof Error ? `Check failed: ${error.message}` : 'Check failed.',
+      );
+    } finally {
+      setCheckingUpdate(false);
+    }
   }
 
   function sendKeySequence(seq: string) {
@@ -740,6 +791,35 @@ export default function App() {
                 <Text style={styles.settingLabel}>Live terminals</Text>
                 <Text style={styles.settingMeta}>{terminalTabs.length} / {MAX_TERMINAL_TABS}</Text>
               </View>
+
+              {/* updates */}
+              <Text style={styles.sectionLabel}>UPDATES</Text>
+              <View style={styles.updateCard}>
+                <View style={styles.updateRow}>
+                  <Text style={styles.updateRowLabel}>Current</Text>
+                  <Text style={styles.updateRowValue} numberOfLines={1}>
+                    {currentUpdateLabel}
+                  </Text>
+                </View>
+                <View style={styles.updateRow}>
+                  <Text style={styles.updateRowLabel}>Channel</Text>
+                  <Text style={styles.updateRowValue}>{Updates.channel ?? 'n/a'}</Text>
+                </View>
+                <Pressable
+                  onPress={checkForUpdates}
+                  disabled={checkingUpdate}
+                  style={[styles.updateCheckBtn, checkingUpdate ? styles.updateCheckBtnBusy : null]}
+                >
+                  {checkingUpdate ? (
+                    <ActivityIndicator size="small" color={CY} />
+                  ) : (
+                    <Text style={styles.updateCheckBtnText}>Check for Updates</Text>
+                  )}
+                </Pressable>
+                {updateStatusText ? (
+                  <Text style={styles.updateStatusText}>{updateStatusText}</Text>
+                ) : null}
+              </View>
             </ScrollView>
 
             <View style={styles.drawerFooter}>
@@ -1117,6 +1197,60 @@ const styles = StyleSheet.create({
     color: '#5f7590',
     fontSize: 11,
     fontFamily: 'Menlo',
+  },
+  updateCard: {
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  updateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  updateRowLabel: {
+    color: '#5f7590',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.5,
+    fontFamily: 'Menlo',
+  },
+  updateRowValue: {
+    color: '#cfe3ee',
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: 'Menlo',
+    flexShrink: 1,
+    marginLeft: 12,
+    textAlign: 'right',
+  },
+  updateCheckBtn: {
+    height: 40,
+    marginTop: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    backgroundColor: 'rgba(41,233,255,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(41,233,255,0.35)',
+  },
+  updateCheckBtnBusy: {
+    opacity: 0.7,
+  },
+  updateCheckBtnText: {
+    color: CY,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  updateStatusText: {
+    color: '#5f7590',
+    fontSize: 11,
+    fontFamily: 'Menlo',
+    marginTop: 8,
+    textAlign: 'center',
   },
   stepper: {
     flexDirection: 'row',
