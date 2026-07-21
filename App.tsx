@@ -464,7 +464,10 @@ export default function App() {
 
       try {
         const formData = new FormData();
-        formData.append('file', {
+        // catbox.moe's API only recognizes the file under this exact field
+        // name — anything else (e.g. "file") is silently ignored, and catbox
+        // still hands back a URL, just one pointing at a 0-byte object.
+        formData.append('fileToUpload', {
           uri: tempFileUri,
           name: `${safeBaseName}.${ext}`,
           type: mimeType,
@@ -501,6 +504,24 @@ export default function App() {
       }
       if (!uploadUrl.startsWith('http')) {
         throw new Error('upload host returned no URL');
+      }
+
+      // catbox can return a URL for a request it accepted but attached no
+      // bytes to (e.g. a field-name mismatch) — confirm the object actually
+      // has content before handing a download command to the terminal,
+      // rather than letting that surface later as a silent 0-byte file.
+      try {
+        const headResponse = await fetch(uploadUrl, { method: 'HEAD' });
+        const contentLength = headResponse.headers.get('content-length');
+        if (headResponse.ok && contentLength !== null && Number(contentLength) === 0) {
+          throw new Error('upload host returned an empty file');
+        }
+      } catch (verifyError) {
+        if (verifyError instanceof Error && verifyError.message === 'upload host returned an empty file') {
+          throw verifyError;
+        }
+        // HEAD itself failing (network hiccup, method not supported) isn't
+        // proof of an empty file — don't block the flow on that.
       }
 
       const downloadCommand = `curl -fsSL ${JSON.stringify(uploadUrl)} -o /tmp/${safeBaseName}-${Date.now()}.${ext}`;
