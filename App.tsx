@@ -5,8 +5,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
-  Animated,
-  Easing,
+  Keyboard,
+  Modal,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -19,6 +19,19 @@ import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 const TERMINAL_URL = 'https://terminal.vitallity.org';
 const TEMP_FILE_HOST = 'https://catbox.moe/user/api.php';
 const MAX_TERMINAL_TABS = 6;
+
+// Accessory-key escape sequences sent into the live terminal.
+const KEY_SEQUENCES: Record<string, string> = {
+  left: '\x1b[D',
+  right: '\x1b[C',
+  up: '\x1b[A',
+  down: '\x1b[B',
+  esc: '\x1b',
+  tab: '\t',
+  backspace: '\x7f',
+};
+
+const DEFAULT_SNIPPETS = ['nmap -sV -T4', 'msfconsole -q', 'tcpdump -i eth0'];
 
 type ConnectionState = 'connecting' | 'live' | 'reconnecting' | 'error';
 
@@ -48,18 +61,19 @@ export default function App() {
     INITIAL_TERMINAL_TAB,
   ]);
   const [tabsReady, setTabsReady] = useState(false);
-  const [pickedScreenshot, setPickedScreenshot] = useState<{
-    uri: string;
-    name: string;
-    terminalTitle: string;
-  } | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [terminalFontSize, setTerminalFontSize] = useState(13);
+  const [reconnectOnWake, setReconnectOnWake] = useState(true);
+  const [ctrlArmed, setCtrlArmed] = useState(false);
+  const [kbHeight, setKbHeight] = useState(0);
+  const [snippets, setSnippets] = useState<string[]>(DEFAULT_SNIPPETS);
   const webViewRef = useRef<WebView>(null);
-  const connectionPulse = useRef(new Animated.Value(0)).current;
+
   const activeTerminal =
     terminalTabs.find((terminal) => terminal.active) ?? terminalTabs[0];
   const statusLabel =
     connectionState === 'live'
-      ? 'Live'
+      ? 'Connected'
       : connectionState === 'reconnecting'
         ? 'Reconnecting'
         : connectionState === 'error'
@@ -72,57 +86,68 @@ export default function App() {
         ? 'warn'
         : 'neutral';
 
+  // Push the chosen terminal font size into the live terminal client.
   useEffect(() => {
-    connectionPulse.stopAnimation();
-    connectionPulse.setValue(0);
-    if (connectionState !== 'live') return;
+    webViewRef.current?.injectJavaScript(`
+      (function() {
+        document.documentElement.style.setProperty('--rn-font-size', '${terminalFontSize}px');
+        if (typeof window.setTerminalFontSize === 'function') {
+          window.setTerminalFontSize(${terminalFontSize});
+        }
+      })();
+      true;
+    `);
+  }, [terminalFontSize, webKey]);
 
-    const animation = Animated.loop(
-      Animated.sequence([
-        Animated.timing(connectionPulse, {
-          toValue: 1,
-          duration: 850,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(connectionPulse, {
-          toValue: 0,
-          duration: 850,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ]),
+  // Track the system keyboard so the accessory dock rides just above it.
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', (e) =>
+      setKbHeight(e.endCoordinates.height),
     );
-    animation.start();
-    return () => animation.stop();
-  }, [connectionPulse, connectionState]);
-
-  const pulseScale = connectionPulse.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 1.14],
-  });
-  const pulseOpacity = connectionPulse.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.58, 0],
-  });
-  const dotOpacity = connectionPulse.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1, 0.42],
-  });
+    const hide = Keyboard.addListener('keyboardDidHide', () => setKbHeight(0));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
 
   function reloadTerminal() {
     setConnectionState('reconnecting');
     setTabsReady(false);
+    setDrawerOpen(false);
     setWebKey((current) => current + 1);
   }
 
-  function openCopyMode() {
+  function sendKeySequence(seq: string) {
     webViewRef.current?.injectJavaScript(`
-      if (typeof toggleSelectMode === 'function') {
-        toggleSelectMode();
-      }
+      (function() {
+        const seq = ${JSON.stringify(seq)};
+        if (typeof sendKey === 'function') {
+          for (const character of seq) { sendKey(character); }
+        }
+      })();
       true;
     `);
+  }
+
+  function pressAccessoryKey(name: keyof typeof KEY_SEQUENCES) {
+    const seq = KEY_SEQUENCES[name];
+    if (seq) sendKeySequence(seq);
+  }
+
+  function toggleCtrl() {
+    setCtrlArmed((current) => !current);
+  }
+
+  function runSnippet(command: string) {
+    typeCommandIntoTerminal(command);
+    setDrawerOpen(false);
+  }
+
+  function adjustFontSize(delta: number) {
+    setTerminalFontSize((current) =>
+      Math.min(20, Math.max(10, current + delta)),
+    );
   }
 
   function sendTerminalTabAction(
@@ -283,9 +308,6 @@ export default function App() {
 
   async function pickScreenshot() {
     const targetTerminalId = tabsReady ? activeTerminal?.id : undefined;
-    const targetTerminalTitle = targetTerminalId
-      ? activeTerminal?.title ?? 'active terminal'
-      : 'the active terminal';
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       Alert.alert(
@@ -333,12 +355,6 @@ export default function App() {
       return;
     }
 
-    setPickedScreenshot({
-      uri: asset.uri,
-      name,
-      terminalTitle: targetTerminalTitle,
-    });
-
     try {
       let uploadUrl = '';
 
@@ -385,7 +401,6 @@ export default function App() {
 
       const downloadCommand = `curl -fsSL ${JSON.stringify(uploadUrl)} -o /tmp/${safeBaseName}-${Date.now()}.${ext}`;
       typeCommandIntoTerminal(downloadCommand, targetTerminalId);
-      setPickedScreenshot(null);
       return;
     } catch (error) {
       failUpload('Send to temporary host', error);
@@ -398,164 +413,103 @@ export default function App() {
     }
   }
 
+  const accessoryKeys: {
+    key: keyof typeof KEY_SEQUENCES | 'ctrl' | 'dismiss';
+    label: string;
+    accent?: boolean;
+    wide?: boolean;
+  }[] = [
+    { key: 'left', label: '←', accent: true },
+    { key: 'right', label: '→', accent: true },
+    { key: 'up', label: '↑', accent: true },
+    { key: 'down', label: '↓', accent: true },
+    { key: 'esc', label: 'esc' },
+    { key: 'tab', label: 'tab' },
+    { key: 'ctrl', label: 'ctrl' },
+    { key: 'backspace', label: '⌫' },
+    { key: 'dismiss', label: '⌨˅', wide: true },
+  ];
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="light" />
 
+      {/* TOP BAR: tab pills · + · upload · hamburger */}
       <View style={styles.topBar}>
-        <View style={styles.headerCopy}>
-          <Text style={styles.eyebrow}>CYBERLAB</Text>
-          <Text style={styles.title}>Terminal Shell</Text>
-        </View>
-
-        <Animated.View
-          accessible
-          accessibilityLabel={`Terminal status: ${statusLabel}`}
-          accessibilityLiveRegion="polite"
-          style={[
-            styles.statusPill,
-            connectionState === 'live' ? styles.statusPillLive : null,
-          ]}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.tabScrollContent}
+          style={styles.tabScroll}
         >
-          {connectionState === 'live' ? (
-            <Animated.View
-              pointerEvents="none"
-              style={[
-                styles.statusPulseRing,
-                {
-                  opacity: pulseOpacity,
-                  transform: [{ scale: pulseScale }],
-                },
-              ]}
-            />
-          ) : null}
-          <Animated.View
-            style={[
-              styles.statusDot,
-              statusTone === 'good'
-                ? styles.statusDotGood
-                : statusTone === 'warn'
-                  ? styles.statusDotWarn
-                  : styles.statusDotNeutral,
-              connectionState === 'live' ? { opacity: dotOpacity } : null,
-            ]}
-          />
-          <Text
-            style={[
-              styles.statusText,
-              connectionState === 'live' ? styles.statusTextLive : null,
-            ]}
-          >
-            {statusLabel}
-          </Text>
-        </Animated.View>
-      </View>
-
-      <View style={styles.actionRow}>
-        <Pressable onPress={reloadTerminal} style={[styles.actionButton, styles.actionPrimary]}>
-          <Text style={[styles.actionText, styles.actionTextPrimary]}>⟳  Reload</Text>
-        </Pressable>
-        <Pressable onPress={pickScreenshot} style={styles.actionButton}>
-          <Text style={styles.actionText}>⇪  Upload</Text>
-        </Pressable>
-        <Pressable onPress={openCopyMode} style={[styles.actionButton, styles.actionAccent]}>
-          <Text style={[styles.actionText, styles.actionTextAccent]}>✂  Copy</Text>
-        </Pressable>
-      </View>
-
-      {pickedScreenshot ? (
-        <View style={styles.previewCard}>
-          <View style={styles.previewThumb}>
-            <Text style={styles.previewThumbText}>IMG</Text>
-          </View>
-          <View style={styles.previewMeta}>
-            <Text style={styles.previewLabel}>Selected screenshot</Text>
-            <Text style={styles.previewName} numberOfLines={1}>
-              {pickedScreenshot.name}
-            </Text>
-            <Text style={styles.previewNote}>
-              Sent the upload command to {pickedScreenshot.terminalTitle}.
-            </Text>
-          </View>
-        </View>
-      ) : null}
-
-      <View style={styles.terminalShell}>
-        <View style={styles.tabBar}>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.tabScrollContent}
-            style={styles.tabScroll}
-          >
-            {terminalTabs.map((terminal) => (
+          {terminalTabs.map((terminal) => (
+            <Pressable
+              key={terminal.id}
+              onPress={() => selectTerminalTab(terminal)}
+              onLongPress={() => closeTerminalTab(terminal)}
+              accessibilityRole="tab"
+              accessibilityLabel={`${terminal.title}, ${terminal.command}`}
+              accessibilityState={{ selected: terminal.active }}
+              style={[styles.tabPill, terminal.active ? styles.tabPillActive : null]}
+            >
               <View
-                key={terminal.id}
                 style={[
-                  styles.terminalTab,
-                  terminal.active ? styles.terminalTabActive : null,
+                  styles.tabDot,
+                  terminal.running ? styles.tabDotRunning : styles.tabDotStopped,
+                ]}
+              />
+              <Text
+                style={[
+                  styles.tabPillText,
+                  terminal.active ? styles.tabPillTextActive : null,
                 ]}
               >
-                <Pressable
-                  onPress={() => selectTerminalTab(terminal)}
-                  accessibilityRole="tab"
-                  accessibilityLabel={`${terminal.title}, ${terminal.command}`}
-                  accessibilityState={{ selected: terminal.active }}
-                  style={styles.terminalTabMain}
-                >
-                  <View
-                    style={[
-                      styles.terminalTabDot,
-                      terminal.running
-                        ? styles.terminalTabDotRunning
-                        : styles.terminalTabDotStopped,
-                    ]}
-                  />
-                  <View style={styles.terminalTabCopy}>
-                    <Text
-                      numberOfLines={1}
-                      style={[
-                        styles.terminalTabTitle,
-                        terminal.active ? styles.terminalTabTitleActive : null,
-                      ]}
-                    >
-                      {terminal.title}
-                    </Text>
-                    <Text numberOfLines={1} style={styles.terminalTabCommand}>
-                      {terminal.command}
-                    </Text>
-                  </View>
-                </Pressable>
-                {tabsReady && terminalTabs.length > 1 ? (
-                  <Pressable
-                    onPress={() => closeTerminalTab(terminal)}
-                    hitSlop={6}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Close ${terminal.title}`}
-                    style={styles.terminalTabClose}
-                  >
-                    <Text style={styles.terminalTabCloseText}>×</Text>
-                  </Pressable>
-                ) : null}
-              </View>
-            ))}
-          </ScrollView>
+                {terminal.index}
+              </Text>
+            </Pressable>
+          ))}
           <Pressable
             onPress={createTerminalTab}
             disabled={!tabsReady || terminalTabs.length >= MAX_TERMINAL_TABS}
             accessibilityRole="button"
             accessibilityLabel="Open a new terminal tab"
             style={[
-              styles.addTerminalButton,
+              styles.addPill,
               !tabsReady || terminalTabs.length >= MAX_TERMINAL_TABS
-                ? styles.addTerminalButtonDisabled
+                ? styles.addPillDisabled
                 : null,
             ]}
           >
-            <Text style={styles.addTerminalButtonText}>+</Text>
+            <Text style={styles.addPillText}>+</Text>
+          </Pressable>
+        </ScrollView>
+
+        <View style={styles.topBarRight}>
+          <Pressable
+            onPress={pickScreenshot}
+            accessibilityRole="button"
+            accessibilityLabel="Upload a file to the terminal"
+            style={styles.uploadPill}
+          >
+            <Text style={styles.uploadPillIcon}>⇪</Text>
+            <Text style={styles.uploadPillText}>Upload</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => setDrawerOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Open menu"
+            hitSlop={8}
+            style={styles.hamburger}
+          >
+            <View style={[styles.hamburgerLine, { width: 17 }]} />
+            <View style={[styles.hamburgerLine, { width: 17 }]} />
+            <View style={[styles.hamburgerLine, { width: 11 }]} />
           </Pressable>
         </View>
+      </View>
 
+      {/* TERMINAL */}
+      <View style={styles.terminalShell}>
         <WebView
           ref={webViewRef}
           key={webKey}
@@ -580,313 +534,633 @@ export default function App() {
           onMessage={handleWebViewMessage}
         />
       </View>
+
+      {/* BOTTOM DOCK: accessory key row (rides above the system keyboard) */}
+      <View style={[styles.dock, { marginBottom: kbHeight }]}>
+        <View style={styles.keyRow}>
+          {accessoryKeys.map((cap) => {
+            const isCtrl = cap.key === 'ctrl';
+            const ctrlOn = isCtrl && ctrlArmed;
+            return (
+              <Pressable
+                key={cap.key}
+                onPress={() =>
+                  isCtrl
+                    ? toggleCtrl()
+                    : cap.key === 'dismiss'
+                      ? Keyboard.dismiss()
+                      : pressAccessoryKey(cap.key as keyof typeof KEY_SEQUENCES)
+                }
+                accessibilityRole="button"
+                accessibilityLabel={cap.key === 'dismiss' ? 'Hide keyboard' : cap.label}
+                style={({ pressed }) => [
+                  styles.keyCap,
+                  cap.wide ? styles.keyCapWide : null,
+                  cap.accent ? styles.keyCapAccent : null,
+                  ctrlOn ? styles.keyCapArmed : null,
+                  pressed ? styles.keyCapPressed : null,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.keyCapText,
+                    cap.accent ? styles.keyCapTextAccent : null,
+                    ctrlOn ? styles.keyCapTextArmed : null,
+                  ]}
+                >
+                  {cap.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+
+      {/* DRAWER */}
+      <Modal
+        visible={drawerOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setDrawerOpen(false)}
+      >
+        <Pressable style={styles.drawerBackdrop} onPress={() => setDrawerOpen(false)} />
+        <SafeAreaView style={styles.drawerSafe} pointerEvents="box-none">
+          <View style={styles.drawer}>
+            <View style={styles.drawerHeader}>
+              <View style={styles.brandRow}>
+                <View style={styles.brandMark}>
+                  <Text style={styles.brandMarkText}>{'>_'}</Text>
+                </View>
+                <View>
+                  <Text style={styles.brandName}>CyberLab</Text>
+                  <Text style={styles.brandSub}>TERMINAL · v2.0</Text>
+                </View>
+              </View>
+              <Pressable onPress={() => setDrawerOpen(false)} hitSlop={8}>
+                <Text style={styles.drawerClose}>×</Text>
+              </Pressable>
+            </View>
+
+            <ScrollView style={styles.drawerBody} contentContainerStyle={styles.drawerBodyContent}>
+              {/* connection */}
+              <View
+                style={[
+                  styles.connCard,
+                  statusTone === 'good'
+                    ? styles.connCardGood
+                    : statusTone === 'warn'
+                      ? styles.connCardWarn
+                      : styles.connCardNeutral,
+                ]}
+              >
+                <View style={styles.connTop}>
+                  <View style={styles.connStatusRow}>
+                    <View
+                      style={[
+                        styles.connDot,
+                        statusTone === 'good'
+                          ? styles.tabDotRunning
+                          : statusTone === 'warn'
+                            ? styles.connDotWarn
+                            : styles.connDotNeutral,
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        styles.connStatusText,
+                        statusTone === 'good' ? styles.connStatusTextGood : null,
+                      ]}
+                    >
+                      {statusLabel.toUpperCase()}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.connRelayRow}>
+                  <Text style={styles.connRelayText}>Railway relay</Text>
+                  <Text style={styles.connArrow}>→</Text>
+                  <Text style={styles.connRelayText}>kali-laptop</Text>
+                </View>
+                <Text style={styles.connMeta}>terminal.vitallity.org · 10.0.0.4</Text>
+              </View>
+
+              {/* snippets */}
+              <Text style={styles.sectionLabel}>SNIPPETS</Text>
+              {snippets.map((cmd) => (
+                <Pressable
+                  key={cmd}
+                  onPress={() => runSnippet(cmd)}
+                  style={styles.snippetRow}
+                >
+                  <Text style={styles.snippetText}>{cmd}</Text>
+                  <Text style={styles.snippetRun}>▷</Text>
+                </Pressable>
+              ))}
+
+              {/* settings */}
+              <Text style={styles.sectionLabel}>SETTINGS</Text>
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Font size</Text>
+                <View style={styles.stepper}>
+                  <Pressable onPress={() => adjustFontSize(-1)} style={styles.stepBtn}>
+                    <Text style={styles.stepBtnText}>−</Text>
+                  </Pressable>
+                  <Text style={styles.stepValue}>{terminalFontSize}</Text>
+                  <Pressable onPress={() => adjustFontSize(1)} style={styles.stepBtn}>
+                    <Text style={styles.stepBtnText}>+</Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              <Pressable
+                onPress={() => setReconnectOnWake((v) => !v)}
+                style={styles.settingRow}
+              >
+                <Text style={styles.settingLabel}>Reconnect on wake</Text>
+                <View
+                  style={[
+                    styles.toggleTrack,
+                    reconnectOnWake ? styles.toggleTrackOn : styles.toggleTrackOff,
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.toggleKnob,
+                      reconnectOnWake ? styles.toggleKnobOn : styles.toggleKnobOff,
+                    ]}
+                  />
+                </View>
+              </Pressable>
+
+              <View style={styles.settingRow}>
+                <Text style={styles.settingLabel}>Live terminals</Text>
+                <Text style={styles.settingMeta}>{terminalTabs.length} / {MAX_TERMINAL_TABS}</Text>
+              </View>
+            </ScrollView>
+
+            <View style={styles.drawerFooter}>
+              <Pressable onPress={reloadTerminal} style={styles.reconnectBtn}>
+                <Text style={styles.reconnectBtnText}>⟳  Reconnect</Text>
+              </Pressable>
+              <Pressable onPress={reloadTerminal} style={styles.powerBtn}>
+                <Text style={styles.powerBtnText}>⏻</Text>
+              </Pressable>
+            </View>
+          </View>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
 
+const CY = '#29e9ff';
+const GREEN = '#00ff9c';
+const PINK = '#ff6ac1';
+
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#05070f',
-    paddingHorizontal: 10,
-    paddingTop: 8,
-    paddingBottom: 10,
+    backgroundColor: '#060910',
   },
   topBar: {
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-    gap: 12,
-  },
-  headerCopy: {
-    flex: 1,
-  },
-  eyebrow: {
-    color: '#29e9ff',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 3,
-    marginBottom: 2,
-  },
-  title: {
-    color: '#f4fbff',
-    fontSize: 20,
-    fontWeight: '800',
-    lineHeight: 24,
-  },
-  statusPill: {
-    position: 'relative',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: '#0a0f1e',
-    borderWidth: 1,
-    borderColor: '#1b2b45',
-  },
-  statusPillLive: {
-    backgroundColor: '#07160f',
-    borderColor: '#00ff9c99',
-    shadowColor: '#00ff9c',
-    shadowOpacity: 0.62,
-    shadowRadius: 11,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 8,
-  },
-  statusPulseRing: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#00ff9c',
-  },
-  statusDot: {
-    width: 9,
-    height: 9,
-    borderRadius: 999,
-  },
-  statusDotNeutral: {
-    backgroundColor: '#ffb020',
-    shadowColor: '#ffb020',
-    shadowOpacity: 0.9,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 0 },
-  },
-  statusDotGood: {
-    backgroundColor: '#00ff9c',
-    shadowColor: '#00ff9c',
-    shadowOpacity: 0.9,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 0 },
-  },
-  statusDotWarn: {
-    backgroundColor: '#ff2e9a',
-    shadowColor: '#ff2e9a',
-    shadowOpacity: 0.9,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 0 },
-  },
-  statusText: {
-    color: '#d7e8f7',
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  statusTextLive: {
-    color: '#8dffc9',
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: 7,
-    marginBottom: 10,
-  },
-  actionButton: {
-    flex: 1,
-    minHeight: 44,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 4,
-    backgroundColor: '#0a0f1e',
-    borderWidth: 1,
-    borderColor: '#1b2b45',
-  },
-  actionPrimary: {
-    borderColor: '#00ff9c66',
-    backgroundColor: '#07160f',
-  },
-  actionAccent: {
-    borderColor: '#ff2e9a66',
-    backgroundColor: '#170611',
-  },
-  actionText: {
-    color: '#29e9ff',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  actionTextPrimary: {
-    color: '#00ff9c',
-  },
-  actionTextAccent: {
-    color: '#ff2e9a',
-  },
-  previewCard: {
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'center',
-    padding: 12,
-    marginBottom: 10,
-    borderRadius: 14,
-    backgroundColor: '#0a0f1e',
-    borderWidth: 1,
-    borderColor: '#29e9ff33',
-  },
-  previewThumb: {
-    width: 52,
-    height: 52,
-    borderRadius: 12,
-    backgroundColor: '#10284f',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#29e9ff55',
-  },
-  previewThumbText: {
-    color: '#effcff',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 1.2,
-  },
-  previewMeta: {
-    flex: 1,
-    gap: 4,
-  },
-  previewLabel: {
-    color: '#29e9ff',
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-  },
-  previewName: {
-    color: '#f4fbff',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  previewNote: {
-    color: '#5f7597',
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  terminalShell: {
-    flex: 1,
-    borderRadius: 14,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#29e9ff44',
-    backgroundColor: '#05070f',
-  },
-  tabBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 7,
-    paddingVertical: 7,
-    backgroundColor: '#070d1a',
-    borderBottomWidth: 1,
-    borderBottomColor: '#29e9ff2e',
+    gap: 10,
+    height: 46,
+    paddingLeft: 12,
+    paddingRight: 12,
   },
   tabScroll: {
     flex: 1,
   },
   tabScrollContent: {
     alignItems: 'center',
-    gap: 6,
-    paddingRight: 2,
+    gap: 7,
+    paddingRight: 4,
   },
-  terminalTab: {
-    width: 132,
-    minHeight: 46,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#ffffff12',
-    backgroundColor: '#0a1221',
-    overflow: 'hidden',
-  },
-  terminalTabActive: {
-    borderColor: '#29e9ff99',
-    backgroundColor: '#10284f',
-  },
-  terminalTabMain: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 44,
+  tabPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
-    paddingLeft: 10,
-    paddingVertical: 6,
+    height: 28,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    backgroundColor: 'rgba(255,255,255,0.03)',
   },
-  terminalTabDot: {
-    width: 7,
-    height: 7,
-    flexShrink: 0,
+  tabPillActive: {
+    backgroundColor: 'rgba(41,233,255,0.1)',
+    borderColor: 'rgba(41,233,255,0.4)',
+  },
+  tabDot: {
+    width: 5,
+    height: 5,
     borderRadius: 999,
   },
-  terminalTabDotRunning: {
-    backgroundColor: '#75ff8f',
+  tabDotRunning: {
+    backgroundColor: GREEN,
   },
-  terminalTabDotStopped: {
-    backgroundColor: '#ff8b7c',
+  tabDotStopped: {
+    backgroundColor: '#6f8aa1',
   },
-  terminalTabCopy: {
-    flex: 1,
-    minWidth: 0,
-    gap: 1,
-  },
-  terminalTabTitle: {
-    color: '#a9bed0',
+  tabPillText: {
+    color: '#6f8aa1',
     fontSize: 12,
     fontWeight: '700',
+    fontFamily: 'Menlo',
   },
-  terminalTabTitleActive: {
-    color: '#f4fbff',
+  tabPillTextActive: {
+    color: '#bfeeff',
   },
-  terminalTabCommand: {
-    color: '#6f8aa1',
-    fontSize: 9,
-    fontWeight: '600',
-  },
-  terminalTabClose: {
+  addPill: {
     width: 28,
-    minHeight: 44,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  terminalTabCloseText: {
-    color: '#8ca7bc',
-    fontSize: 20,
-    lineHeight: 22,
-    fontWeight: '500',
-  },
-  addTerminalButton: {
-    width: 44,
-    height: 44,
-    flexShrink: 0,
-    borderRadius: 13,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#123456',
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#29e9ffaa',
+    borderStyle: 'dashed',
+    borderColor: '#2a3a52',
   },
-  addTerminalButtonDisabled: {
-    opacity: 0.38,
+  addPillDisabled: {
+    opacity: 0.4,
   },
-  addTerminalButtonText: {
-    color: '#6ffff0',
-    fontSize: 25,
-    lineHeight: 27,
+  addPillText: {
+    color: '#6f8aa1',
+    fontSize: 17,
+    lineHeight: 19,
     fontWeight: '500',
+  },
+  topBarRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  uploadPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    height: 30,
+    paddingHorizontal: 13,
+    borderRadius: 9,
+    backgroundColor: '#0d1524',
+    borderWidth: 1,
+    borderColor: '#24334a',
+  },
+  uploadPillIcon: {
+    color: '#8aa3ba',
+    fontSize: 15,
+  },
+  uploadPillText: {
+    color: '#8aa3ba',
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: 'Menlo',
+  },
+  hamburger: {
+    width: 34,
+    height: 34,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    gap: 3.5,
+  },
+  hamburgerLine: {
+    height: 2,
+    borderRadius: 2,
+    backgroundColor: '#8aa3ba',
+  },
+  terminalShell: {
+    flex: 1,
+    overflow: 'hidden',
+    backgroundColor: '#060910',
   },
   webviewContainer: {
     flex: 1,
-    backgroundColor: '#05070f',
+    backgroundColor: '#060910',
   },
   webview: {
     flex: 1,
-    backgroundColor: '#05070f',
+    backgroundColor: '#060910',
+  },
+  dock: {
+    backgroundColor: '#080d18',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(41,233,255,0.16)',
+    paddingTop: 10,
+    paddingBottom: 10,
+  },
+  keyRow: {
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 10,
+  },
+  keyCap: {
+    flex: 1,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    backgroundColor: '#141c2b',
+    borderWidth: 1,
+    borderColor: '#24334a',
+  },
+  keyCapWide: {
+    flex: 1.3,
+  },
+  keyCapAccent: {
+    borderColor: 'rgba(41,233,255,0.33)',
+  },
+  keyCapArmed: {
+    backgroundColor: 'rgba(41,233,255,0.16)',
+    borderColor: CY,
+  },
+  keyCapPressed: {
+    backgroundColor: '#20304a',
+  },
+  keyCapText: {
+    color: '#b7cbdd',
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: 'Menlo',
+  },
+  keyCapTextAccent: {
+    color: CY,
+  },
+  keyCapTextArmed: {
+    color: CY,
+  },
+  drawerBackdrop: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(4,7,14,0.62)',
+  },
+  drawerSafe: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  drawer: {
+    width: 322,
+    flex: 1,
+    backgroundColor: '#0b1424',
+    borderLeftWidth: 1,
+    borderLeftColor: 'rgba(41,233,255,0.22)',
+  },
+  drawerHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+  },
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  brandMark: {
+    width: 38,
+    height: 38,
+    borderRadius: 11,
+    backgroundColor: CY,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  brandMarkText: {
+    color: '#04121a',
+    fontSize: 16,
+    fontWeight: '800',
+    fontFamily: 'Menlo',
+  },
+  brandName: {
+    color: '#f4fbff',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  brandSub: {
+    color: '#5f7590',
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 1.5,
+    fontFamily: 'Menlo',
+  },
+  drawerClose: {
+    color: '#6f8aa1',
+    fontSize: 24,
+    lineHeight: 26,
+  },
+  drawerBody: {
+    flex: 1,
+  },
+  drawerBodyContent: {
+    padding: 16,
+  },
+  connCard: {
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+  },
+  connCardGood: {
+    backgroundColor: 'rgba(0,255,156,0.05)',
+    borderColor: 'rgba(0,255,156,0.28)',
+  },
+  connCardWarn: {
+    backgroundColor: 'rgba(255,106,193,0.06)',
+    borderColor: 'rgba(255,106,193,0.3)',
+  },
+  connCardNeutral: {
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  connTop: {
+    marginBottom: 10,
+  },
+  connStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  connDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 999,
+  },
+  connDotWarn: {
+    backgroundColor: PINK,
+  },
+  connDotNeutral: {
+    backgroundColor: '#ffb020',
+  },
+  connStatusText: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.5,
+    color: '#8aa3ba',
+    fontFamily: 'Menlo',
+  },
+  connStatusTextGood: {
+    color: GREEN,
+  },
+  connRelayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  connRelayText: {
+    color: '#cfe3ee',
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: 'Menlo',
+  },
+  connArrow: {
+    color: CY,
+    fontSize: 12,
+  },
+  connMeta: {
+    color: '#5f7590',
+    fontSize: 11,
+    marginTop: 5,
+    fontFamily: 'Menlo',
+  },
+  sectionLabel: {
+    color: '#5f7590',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.8,
+    fontFamily: 'Menlo',
+    marginTop: 20,
+    marginBottom: 9,
+    marginLeft: 4,
+  },
+  snippetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: 40,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    marginBottom: 6,
+  },
+  snippetText: {
+    color: '#bfeeff',
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: 'Menlo',
+  },
+  snippetRun: {
+    color: CY,
+    fontSize: 14,
+  },
+  settingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: 42,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    marginBottom: 6,
+  },
+  settingLabel: {
+    color: '#cfe3ee',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  settingMeta: {
+    color: '#5f7590',
+    fontSize: 11,
+    fontFamily: 'Menlo',
+  },
+  stepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  stepBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 7,
+    backgroundColor: '#141c2b',
+    borderWidth: 1,
+    borderColor: '#24334a',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepBtnText: {
+    color: '#8aa3ba',
+    fontSize: 14,
+  },
+  stepValue: {
+    color: '#cfe3ee',
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: 'Menlo',
+    minWidth: 16,
+    textAlign: 'center',
+  },
+  toggleTrack: {
+    width: 42,
+    height: 25,
+    borderRadius: 13,
+    justifyContent: 'center',
+  },
+  toggleTrackOn: {
+    backgroundColor: GREEN,
+  },
+  toggleTrackOff: {
+    backgroundColor: '#2a3a52',
+  },
+  toggleKnob: {
+    width: 20,
+    height: 20,
+    borderRadius: 999,
+    backgroundColor: '#04121a',
+    position: 'absolute',
+  },
+  toggleKnobOn: {
+    right: 2.5,
+  },
+  toggleKnobOff: {
+    left: 2.5,
+  },
+  drawerFooter: {
+    flexDirection: 'row',
+    gap: 9,
+    padding: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+  },
+  reconnectBtn: {
+    flex: 1,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 11,
+    backgroundColor: 'rgba(41,233,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(41,233,255,0.4)',
+  },
+  reconnectBtnText: {
+    color: CY,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  powerBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 11,
+    backgroundColor: 'rgba(255,106,193,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,106,193,0.32)',
+  },
+  powerBtnText: {
+    color: PINK,
+    fontSize: 16,
   },
 });
