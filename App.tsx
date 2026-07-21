@@ -156,16 +156,30 @@ export default function App() {
         return;
       }
       const result = await Updates.checkForUpdateAsync();
-      if (!result.isAvailable) {
+      // A rollback directive reports isAvailable: false too, so it can't be
+      // told apart from "nothing new" by that flag alone — check
+      // isRollBackToEmbedded separately or a bad OTA can never be rolled
+      // back from this screen.
+      if (!result.isAvailable && !result.isRollBackToEmbedded) {
         setUpdateStatusText("You're up to date.");
         return;
       }
-      setUpdateStatusText('Downloading update…');
-      await Updates.fetchUpdateAsync();
-      setUpdateStatusText('Update downloaded.');
+      setUpdateStatusText(
+        result.isRollBackToEmbedded ? 'Rolling back…' : 'Downloading update…',
+      );
+      const fetchResult = await Updates.fetchUpdateAsync();
+      if (!fetchResult.isNew && !fetchResult.isRollBackToEmbedded) {
+        setUpdateStatusText("You're up to date.");
+        return;
+      }
+      setUpdateStatusText(
+        fetchResult.isRollBackToEmbedded ? 'Rollback ready.' : 'Update downloaded.',
+      );
       Alert.alert(
-        'Update ready',
-        'A new version has been downloaded. Restart now to apply it?',
+        fetchResult.isRollBackToEmbedded ? 'Rollback ready' : 'Update ready',
+        fetchResult.isRollBackToEmbedded
+          ? 'The server has rolled back to a previous version. Restart now to apply it?'
+          : 'A new version has been downloaded. Restart now to apply it?',
         [
           { text: 'Later', style: 'cancel' },
           {
