@@ -822,6 +822,8 @@ export default function App() {
                 <Pressable
                   onPress={checkForUpdates}
                   disabled={checkingUpdate}
+                  accessibilityRole="button"
+                  accessibilityLabel="Check for updates"
                   style={[styles.updateCheckBtn, checkingUpdate ? styles.updateCheckBtnBusy : null]}
                 >
                   {checkingUpdate ? (
